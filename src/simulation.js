@@ -79,6 +79,7 @@ export class RefinerySimulation {
     this.emergencyShutdown = false;
     this.processTopology = this._createTopology();
 
+
     this.logs = [];
     this.pushLog(
       "info",
@@ -257,6 +258,7 @@ export class RefinerySimulation {
     };
   }
 
+
   _unit(id, name, capacity, category) {
     return {
       id,
@@ -271,11 +273,13 @@ export class RefinerySimulation {
       incidents: 0,
       alert: null,
       alertTimer: 0,
+
       manualOffline: false,
       emergencyOffline: false,
       overrideThrottle: 1,
       alertDetail: null,
       lastIncident: null,
+
     };
   }
 
@@ -351,6 +355,7 @@ export class RefinerySimulation {
     this._seedDirectives();
     this.unitOverrides = {};
     this.emergencyShutdown = false;
+
     this.units.forEach((unit) => {
       unit.throughput = 0;
       unit.utilization = 0;
@@ -420,6 +425,7 @@ export class RefinerySimulation {
     const scenario = this.activeScenario;
     const crudeSetting = this.params.crudeIntake;
     const crudeAvailable = crudeSetting * scenario.crudeMultiplier;
+
 
     const distState = this._resolveUnitState("distillation");
     const distillation = distState.unit;
@@ -503,12 +509,14 @@ export class RefinerySimulation {
       this._updateUnitMode(reformer);
     }
 
+
     const reformate = reformFeed * 0.92;
     const reformHydrogen = reformFeed * 0.05;
     const reformLoss = reformFeed * 0.03;
     result.gasoline += reformate;
     result.hydrogen += reformHydrogen;
     result.waste += reformLoss;
+
 
     const fccState = this._resolveUnitState("fcc");
     const fcc = fccState.unit;
@@ -521,11 +529,13 @@ export class RefinerySimulation {
     const residUsedByFcc = Math.min(residPool, fccFeed - heavyUsedByFcc);
     residPool -= residUsedByFcc;
 
+
     if (fcc) {
       fcc.throughput = fccFeed;
       fcc.utilization = fccCapacity > 0 ? fccFeed / fccCapacity : 0;
       this._updateUnitMode(fcc);
     }
+
 
     const fccGasoline = fccFeed * 0.54;
     const fccDiesel = fccFeed * 0.12;
@@ -543,6 +553,7 @@ export class RefinerySimulation {
       hydrocracker && hydroState.online
         ? hydrocracker.capacity * clamp(hydroState.throttle, 0, 1.2)
         : 0;
+
     const hydroFeedAvailable = heavyPool + residPool + dieselPool * 0.25;
     const hydroFeed = Math.min(hydroFeedAvailable, hydroCapacity);
 
@@ -559,6 +570,7 @@ export class RefinerySimulation {
       this._updateUnitMode(hydrocracker);
     }
 
+
     const hydroGasoline = hydroFeed * 0.42;
     const hydroDiesel = hydroFeed * 0.3;
     const hydroJet = hydroFeed * 0.2;
@@ -568,6 +580,7 @@ export class RefinerySimulation {
     kerosenePool += hydroJet;
     result.hydrogen += hydroFeed * 0.04;
     result.waste += hydroLoss;
+
 
     const alkylationState = this._resolveUnitState("alkylation");
     const alkylation = alkylationState.unit;
@@ -584,11 +597,13 @@ export class RefinerySimulation {
       this._updateUnitMode(alkylation);
     }
 
+
     const alkGasoline = alkFeed * 0.88;
     const alkLoss = alkFeed * 0.06;
     result.gasoline += alkGasoline;
     result.lpg += lpgPool;
     result.waste += alkLoss;
+
 
     const sulfurState = this._resolveUnitState("sulfur");
     const sulfur = sulfurState.unit;
@@ -601,6 +616,7 @@ export class RefinerySimulation {
       sulfur.utilization = sulfurCapacity > 0 ? sulfurFeed / sulfurCapacity : 0;
       this._updateUnitMode(sulfur);
     }
+
     residPool -= sulfurFeed * 0.6;
     heavyPool -= sulfurFeed * 0.4;
     result.sulfur += sulfurRemoved;
@@ -774,6 +790,7 @@ export class RefinerySimulation {
     }
   }
 
+
   _updateReliability(units, context) {
     const maintenance = this.params.maintenance;
     const safety = this.params.safety;
@@ -785,10 +802,12 @@ export class RefinerySimulation {
 
     Object.values(units).forEach((unit) => {
       if (!unit) return;
+
       if (unit.status === "standby") {
         integritySum += unit.integrity;
         return;
       }
+
       const utilization = unit.utilization || 0;
       const baseWear = 0.004 * context.hours;
       const stressWear = Math.max(0, utilization - 1) * 0.04 * context.hours;
@@ -824,6 +843,7 @@ export class RefinerySimulation {
           this.pushLog(
             severity,
             message,
+
             { unitId: unit.id }
           );
           if (severity === "danger") {
@@ -835,6 +855,7 @@ export class RefinerySimulation {
           }
           unit.alert = severity;
           unit.alertTimer = Math.max(unit.alertTimer, severity === "danger" ? 180 : 90);
+
           unit.alertDetail = {
             severity,
             cause,
@@ -845,6 +866,7 @@ export class RefinerySimulation {
             safety,
           };
           unit.lastIncident = { ...unit.alertDetail };
+
         }
       }
     });
@@ -894,6 +916,7 @@ export class RefinerySimulation {
     const last = reasons.pop();
     return `${reasons.join(", ")}, and ${last}`;
   }
+
 
   getMetrics() {
     return { ...this.metrics };
@@ -1586,4 +1609,5 @@ export class RefinerySimulation {
     this.setAllUnitsOffline(false, { emergencyOnly: true, quiet: true });
     this.pushLog("info", "Emergency shutdown cleared; restart crews may warm up units.");
   }
+
 }
