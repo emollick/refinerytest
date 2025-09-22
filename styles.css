@@ -167,6 +167,7 @@ body {
   background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(113, 158, 220, 0.6), rgba(255, 255, 255, 0));
 }
 
+
 .windows {
   display: flex;
   flex-wrap: wrap;
@@ -232,6 +233,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+
 }
 
 .map-toolbar {
@@ -289,6 +291,7 @@ body {
   position: relative;
   flex: 1 1 420px;
   min-height: 340px;
+
   border: 3px solid #0f1828;
   box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.35);
   background: #061020;
@@ -903,6 +906,7 @@ body {
   border-right-color: #ffffff;
   border-bottom-color: #ffffff;
 }
+
 
 #event-log {
   list-style: none;
