@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SimRefinery Desk - Three.js prototype</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@400;700&family=Roboto:wght@300;400;500;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="desktop">
+      <nav id="menu-bar" class="menu-bar" role="menubar">
+        <button type="button" class="menu-item" role="menuitem">File</button>
+        <button type="button" class="menu-item" role="menuitem">Options</button>
+        <button type="button" class="menu-item" role="menuitem">Refinery</button>
+        <button type="button" class="menu-item" role="menuitem">Windows</button>
+        <button type="button" class="menu-item" role="menuitem">Pause</button>
+        <div class="menu-spacer" aria-hidden="true"></div>
+        <span class="menu-title">SimRefinery Operator Console</span>
+      </nav>
+
+      <div class="windows">
+        <section class="window map-window" aria-label="SimRefinery refinery map window">
+          <header class="window-title">
+            <span>SimRefinery Map</span>
+            <span id="sim-clock" class="window-clock">Jan 01, 1992 03:00 AM</span>
+          </header>
+          <div class="window-body">
+            <div class="map-toolbar" role="toolbar" aria-label="Quick controls and shortcuts">
+              <button type="button" class="toolbar-button" data-preset="auto">AUTO CTL</button>
+              <button type="button" class="toolbar-button" data-preset="manual">MANUAL</button>
+              <button type="button" class="toolbar-button" data-preset="shutdown">SHUTDOWN</button>
+              <div class="toolbar-divider" role="separator"></div>
+              <button type="button" class="toolbar-button" data-unit-target="distillation">CDU</button>
+              <button type="button" class="toolbar-button" data-unit-target="reformer">REF</button>
+              <button type="button" class="toolbar-button" data-unit-target="fcc">FCC</button>
+              <button type="button" class="toolbar-button" data-unit-target="hydrocracker">HYD</button>
+              <button type="button" class="toolbar-button" data-unit-target="alkylation">ALKY</button>
+              <button type="button" class="toolbar-button" data-unit-target="sulfur">SULF</button>
+              <div class="toolbar-divider" role="separator"></div>
+              <button type="button" class="toolbar-button" data-scenario="steady">BASE</button>
+              <button type="button" class="toolbar-button" data-scenario="summerRush">SUMMER</button>
+              <button type="button" class="toolbar-button" data-scenario="winterDiesel">WINTER</button>
+              <button type="button" class="toolbar-button" data-scenario="quakeDrill">QUAKE</button>
+            </div>
+            <div id="map-viewport" aria-hidden="false">
+              <div id="scene-container" aria-label="Interactive refinery view"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="window edit-window" aria-label="SimRefinery edit and monitoring window">
+          <header class="window-title">
+            <span>SimRefinery Edit</span>
+            <span id="mode-badge" class="mode-badge">AUTO</span>
+          </header>
+          <div class="window-body">
+            <div class="edit-grid">
+              <section id="hud" class="panel operations" aria-live="polite">
+                <h2>Operations Console</h2>
+                <div class="control-group">
+                  <label for="crude-input">Crude Intake <span id="crude-value"></span></label>
+                  <input type="range" id="crude-input" min="40" max="220" value="120" />
+                </div>
+                <div class="control-group">
+                  <label for="gasoline-focus">Product Focus <span id="focus-value"></span></label>
+                  <input type="range" id="gasoline-focus" min="0" max="100" value="50" />
+                  <p class="help-text">
+                    Shift production toward gasoline (right) or middle distillates (left).
+                  </p>
+                </div>
+                <div class="control-row">
+                  <div class="control-group compact">
+                    <label for="maintenance">Maintenance <span id="maintenance-value"></span></label>
+                    <input type="range" id="maintenance" min="0" max="100" value="65" />
+                  </div>
+                  <div class="control-group compact">
+                    <label for="safety">Safety Focus <span id="safety-value"></span></label>
+                    <input type="range" id="safety" min="0" max="100" value="45" />
+                  </div>
+                  <div class="control-group compact">
+                    <label for="env">Environmental Investment <span id="env-value"></span></label>
+                    <input type="range" id="env" min="0" max="100" value="35" />
+                  </div>
+                </div>
+                <div class="control-row buttons">
+                  <button id="toggle-sim" type="button">Pause</button>
+                  <button id="step-sim" type="button">Step</button>
+                  <button id="reset-sim" type="button">Reset</button>
+                </div>
+                <div class="scenario-group">
+                  <label for="scenario-select">Scenario</label>
+                  <select id="scenario-select" aria-describedby="scenario-description"></select>
+                  <p id="scenario-description" class="help-text"></p>
+                </div>
+              </section>
+
+              <section id="reports" class="panel metrics">
+                <h2>Production Dashboard</h2>
+                <div class="metric-grid">
+                  <div class="metric">
+                    <h3>Gasoline</h3>
+                    <span id="gasoline-output">0</span>
+                  </div>
+                  <div class="metric">
+                    <h3>Diesel</h3>
+                    <span id="diesel-output">0</span>
+                  </div>
+                  <div class="metric">
+                    <h3>Jet Fuel</h3>
+                    <span id="jet-output">0</span>
+                  </div>
+                  <div class="metric">
+                    <h3>LPG</h3>
+                    <span id="lpg-output">0</span>
+                  </div>
+                </div>
+                <div class="metric-wide">
+                  <h3>Profit / hr</h3>
+                  <span id="profit-output">$0</span>
+                </div>
+                <div class="metric-wide">
+                  <h3>Reliability</h3>
+                  <span id="reliability-output">100%</span>
+                </div>
+                <div class="metric-wide">
+                  <h3>Carbon Intensity</h3>
+                  <span id="carbon-output">0</span>
+                </div>
+                <div class="metric-wide scorecard">
+                  <div class="scorecard-header">
+                    <h3>Operations Grade</h3>
+                    <div class="scorecard-grade">
+                      <span id="score-grade">B</span>
+                      <small id="score-delta">—</small>
+                    </div>
+                  </div>
+                  <canvas id="score-trend" width="220" height="64" aria-hidden="true"></canvas>
+                  <p id="score-note">Plant stabilizing…</p>
+                </div>
+              </section>
+
+              <section id="unit-panel" class="panel unit-detail" aria-live="polite">
+                <h2>Unit Detail</h2>
+                <div class="panel-body" id="unit-details">
+                  <p>Select a processing unit to inspect its condition.</p>
+                </div>
+              </section>
+
+              <section id="notifications" class="panel log-panel">
+                <h2>Event Log</h2>
+                <div class="panel-body">
+                  <ul id="event-log"></ul>
+                </div>
+              </section>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section id="footer" class="window about-window">
+        <header class="window-title">Operator Notes</header>
+        <div class="window-body">
+          <p>
+            This interactive homage reimagines the 1992 SimRefinery console with a three.js map and retro
+            controls. Adjust levers, explore process flow, and watch how refinery choices ripple across the
+            plant while dashboards grade your performance.
+          </p>
+          <ul class="notes-list">
+            <li>Click any process unit to inspect throughput, utilization, and incident history.</li>
+            <li>Shift-drag or use the right mouse button to pan the map; scroll the mouse wheel to zoom.</li>
+            <li>Monitor the hovering gauges and alerts—yellow indicates strain, red marks critical incidents.</li>
+            <li>The Operations Grade panel blends profit, reliability, and emissions into a running score.</li>
+          </ul>
+        </div>
+      </section>
+    </div>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
