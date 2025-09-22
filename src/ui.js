@@ -17,7 +17,6 @@ export class UIController {
       typeof simulation.getProcessTopology === "function" ? simulation.getProcessTopology() : {};
     this.latestFlows = {};
 
-
     this.elements = {
       crude: document.getElementById("crude-input"),
       crudeValue: document.getElementById("crude-value"),

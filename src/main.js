@@ -46,7 +46,6 @@ if (!isWebGLAvailable()) {
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.5));
-
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 sceneContainer.appendChild(renderer.domElement);
 renderer.domElement.classList.add("scene-canvas");
@@ -297,7 +296,6 @@ buildPipelines();
 buildDecor();
 populateScenarioMenu();
 populateUnitMenu();
-
 buildProcessLegend();
 
 
@@ -322,7 +320,6 @@ const PRESETS = {
   },
   shutdown: {
     label: "SHUTDN",
-
     crude: 0,
     focus: 0.5,
 
@@ -454,7 +451,6 @@ function applyPreset(name, options = {}) {
   } else {
     simulation.releaseEmergencyShutdown();
   }
-
 
   ui.refreshControls();
   updatePresetButtons(name);
@@ -907,7 +903,6 @@ function refreshUnitPulse(time, force = false) {
     entry.incidents.textContent = formatIncidentCount(unit.incidents || 0);
     entry.item.classList.toggle("offline", unit.status === "offline");
     entry.item.classList.toggle("standby", unit.status === "standby");
-
     entry.item.classList.toggle("overload", utilization > 1);
     entry.item.classList.toggle("selected", selectedUnitId === unit.id);
     entry.item.classList.toggle("alerting", Boolean(unit.alert));
@@ -1756,7 +1751,6 @@ function handleWheel(event) {
   const direction = Math.sign(event.deltaY);
   const zoomFactor = direction > 0 ? 1.12 : 0.88;
   viewHeight = THREE.MathUtils.clamp(viewHeight * zoomFactor, MIN_VIEW, MAX_VIEW);
-
   const aspect = renderer.domElement.clientWidth / renderer.domElement.clientHeight;
   updateCamera(aspect);
 }
@@ -2126,5 +2120,4 @@ function buildProcessLegend() {
   legend.appendChild(list);
   mapStatusPanel.appendChild(legend);
 }
-
 

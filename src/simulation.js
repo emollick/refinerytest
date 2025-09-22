@@ -79,7 +79,6 @@ export class RefinerySimulation {
     this.emergencyShutdown = false;
     this.processTopology = this._createTopology();
 
-
     this.logs = [];
     this.pushLog(
       "info",
@@ -517,7 +516,6 @@ export class RefinerySimulation {
     result.hydrogen += reformHydrogen;
     result.waste += reformLoss;
 
-
     const fccState = this._resolveUnitState("fcc");
     const fcc = fccState.unit;
     const fccCapacity =
@@ -569,7 +567,6 @@ export class RefinerySimulation {
       hydrocracker.utilization = hydroCapacity > 0 ? hydroFeed / hydroCapacity : 0;
       this._updateUnitMode(hydrocracker);
     }
-
 
     const hydroGasoline = hydroFeed * 0.42;
     const hydroDiesel = hydroFeed * 0.3;
