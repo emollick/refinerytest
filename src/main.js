@@ -1,3 +1,4 @@
+
 import * as THREE from "../vendor/three.module.js";
 import { RefinerySimulation } from "./simulation.js";
 import { UIController } from "./ui.js";
@@ -42,6 +43,7 @@ if (!isWebGLAvailable()) {
   throw new Error("WebGL not supported in this environment.");
 }
 
+
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.5));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -51,6 +53,7 @@ renderer.domElement.classList.add("scene-canvas");
 const scene = new THREE.Scene();
 
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
+
 const BASE_VIEW = 82;
 const MIN_VIEW = 18;
 const MAX_VIEW = 180;
@@ -135,6 +138,7 @@ let selectedUnitId = null;
 let activeMenu = null;
 const unitConnectionIndex = buildUnitConnectionIndex(processTopology);
 const highlightedPipelines = new Set();
+
 const gaugeColors = {
   good: new THREE.Color(0x6ae28a),
   warn: new THREE.Color(0xf2d06b),
@@ -294,6 +298,7 @@ populateScenarioMenu();
 populateUnitMenu();
 buildProcessLegend();
 
+
 const PRESETS = {
   auto: {
     label: "AUTO",
@@ -317,6 +322,7 @@ const PRESETS = {
     label: "SHUTDN",
     crude: 0,
     focus: 0.5,
+
     maintenance: 0.82,
     safety: 0.72,
     environment: 0.55,
@@ -419,6 +425,7 @@ function animate() {
 
   updateUnits(elapsed);
   updatePipelines(flows, elapsed);
+
   updateEnvironment(elapsed);
   updateLogisticsVisuals(logisticsState, elapsed);
   refreshUnitPulse(elapsed);
@@ -639,6 +646,7 @@ function setFlowVisibility(visible) {
   pipelineVisuals.forEach((visual) => {
     const isHighlighted = highlightedPipelines.has(visual.id);
     visual.group.visible = visible || isHighlighted;
+
   });
   updateToggleButton(flowToggleButton, flowOverlayVisible, "Hide Flow Glow", "Show Flow Glow");
 }
@@ -928,6 +936,7 @@ function formatUnitStatus(unit) {
     }
     return "Standby";
   }
+
   const minutes = Math.max(1, Math.ceil(unit.downtime || 0));
   return `Offline (${minutes}m)`;
 }
@@ -1408,6 +1417,7 @@ function createTankFarm() {
     liquid.scale.y = 0.35;
     scene.add(liquid);
     tankVisuals[product].push({ mesh: liquid, baseY: 0.4, height: 1 });
+
   });
 }
 
@@ -1429,6 +1439,7 @@ function createDock() {
   );
   hull.position.y = 1.1;
   ship.add(hull);
+
   const bridge = new THREE.Mesh(
     new THREE.BoxGeometry(3.8, 1.5, 2.2),
     new THREE.MeshStandardMaterial({ color: 0xf1f2f3, roughness: 0.4, metalness: 0.05, flatShading: true })
@@ -1772,14 +1783,17 @@ function panCamera(deltaX, deltaY) {
 }
 
 function constrainCameraTarget() {
+
   const bounds = {
     minX: -MAP_WIDTH / 2 + TILE_SIZE * 1.5,
     maxX: MAP_WIDTH / 2 - TILE_SIZE * 1.5,
     minZ: -MAP_HEIGHT / 2 + TILE_SIZE * 1.5,
     maxZ: MAP_HEIGHT / 2 - TILE_SIZE * 1.5,
   };
+
   cameraTarget.x = THREE.MathUtils.clamp(cameraTarget.x, bounds.minX, bounds.maxX);
   cameraTarget.z = THREE.MathUtils.clamp(cameraTarget.z, bounds.minZ, bounds.maxZ);
+
 }
 
 function selectUnitAtPointer(event) {
@@ -1895,6 +1909,7 @@ function updateUnits(time) {
     });
 
     if (visual.statusLamp) {
+
       const lampColor = isOnline
         ? integrity > 0.45
           ? 0x74d77a
@@ -1920,6 +1935,7 @@ function updateUnits(time) {
 
     if (visual.gauge) {
       updateGauge(visual.gauge, utilization, integrity, isOnline, selectedUnitId === unit.id);
+
       billboard(visual.gauge.group);
     }
 

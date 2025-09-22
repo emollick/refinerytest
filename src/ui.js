@@ -1,8 +1,10 @@
+
 const PRODUCT_LABELS = {
   gasoline: "Gasoline",
   diesel: "Diesel",
   jet: "Jet Fuel",
 };
+
 
 export class UIController {
   constructor(simulation) {
@@ -10,6 +12,7 @@ export class UIController {
     this.selectedUnitId = null;
     this.lastLogSignature = "";
     this.modeFlashTimeout = null;
+
     this.processTopology =
       typeof simulation.getProcessTopology === "function" ? simulation.getProcessTopology() : {};
     this.latestFlows = {};
@@ -54,6 +57,7 @@ export class UIController {
       shipmentList: document.getElementById("shipment-list"),
       shipmentReliability: document.getElementById("shipment-reliability"),
       directiveList: document.getElementById("directive-list"),
+
     };
 
     this.profitFormatter = new Intl.NumberFormat("en-US", {
@@ -61,7 +65,9 @@ export class UIController {
       currency: "USD",
       maximumFractionDigits: 0,
     });
+
     this.flowFormatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
+
 
     this._bindControls();
     this._populateScenarios();
@@ -203,6 +209,7 @@ export class UIController {
 
     const status = document.createElement("p");
     status.textContent = this._describeUnitStatus(unit);
+
     status.classList.add("unit-status");
     unitDetails.appendChild(status);
 
@@ -220,6 +227,7 @@ export class UIController {
     this._renderUnitControls(unitDetails, unit, overrideState);
     this._renderAlertDetail(unitDetails, unit);
     this._renderProcessTopology(unitDetails, unit);
+
   }
 
   _statRow(label, value) {
@@ -233,12 +241,14 @@ export class UIController {
     return wrapper;
   }
 
+
   update(logisticsState, flows = null) {
     if (flows) {
       this.latestFlows = { ...flows };
     } else {
       this.latestFlows = this.simulation.getFlows();
     }
+
     const metrics = this.simulation.getMetrics();
     this._renderMetrics(metrics);
     this._renderLogs();
@@ -252,6 +262,7 @@ export class UIController {
     const logistics = logisticsState || this.simulation.getLogisticsState();
     this._renderLogistics(logistics);
     this._renderDirectives(this.simulation.getDirectives());
+
   }
 
   refreshControls() {
@@ -861,6 +872,7 @@ export class UIController {
     const minutes = Math.max(1, Math.ceil(unit.downtime || 0));
     return `Offline (${minutes} min remaining)`;
   }
+
 
   _formatHours(hours) {
     if (!Number.isFinite(hours)) {
