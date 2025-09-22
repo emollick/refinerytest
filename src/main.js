@@ -322,6 +322,7 @@ const toolbarPresetButtons = document.querySelectorAll("[data-preset]");
 const toolbarUnitButtons = document.querySelectorAll("[data-unit-target]");
 const toolbarScenarioButtons = document.querySelectorAll("[data-scenario]");
 
+
 toolbarPresetButtons.forEach((button) => {
   button.addEventListener("click", () => {
     const preset = button.dataset.preset;
@@ -407,6 +408,7 @@ function animate() {
   simulation.update(delta);
   const logisticsState = simulation.getLogisticsState();
   ui.update(logisticsState);
+
 
   updateUnits(elapsed);
   updatePipelines(simulation.getFlows(), elapsed);
@@ -1385,6 +1387,7 @@ function createTankFarm() {
     liquid.scale.y = 0.35;
     scene.add(liquid);
     tankVisuals[product].push({ mesh: liquid, baseY: 0.4, height: 1 });
+
   });
 }
 
@@ -1406,6 +1409,7 @@ function createDock() {
   );
   hull.position.y = 1.1;
   ship.add(hull);
+
   const bridge = new THREE.Mesh(
     new THREE.BoxGeometry(3.8, 1.5, 2.2),
     new THREE.MeshStandardMaterial({ color: 0xf1f2f3, roughness: 0.4, metalness: 0.05, flatShading: true })
@@ -1917,4 +1921,5 @@ function updateDockActivity(shipments = [], time) {
   const pulse = Math.abs(Math.sin(time * (urgent ? 6 : 3))) * 0.35;
   dockVisual.beacon.material.opacity = Math.min(0.9, base + pulse);
 }
+
 

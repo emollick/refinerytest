@@ -566,6 +566,7 @@ export class RefinerySimulation {
 
     this._updateDirectives(hours, { shipments: logisticsReport, metrics: this.metrics });
 
+
     this._updateScorecard({
       profitPerHour,
       crudeThroughput,
@@ -1194,4 +1195,5 @@ export class RefinerySimulation {
   getDirectives() {
     return this.directives.map((directive) => ({ ...directive }));
   }
+
 }
