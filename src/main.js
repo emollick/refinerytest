@@ -1849,4 +1849,4 @@ function updateEnvironment(time) {
     flareVisual.light.intensity = 3 + flareLevel * 8;
     flareVisual.light.distance = 22 + flareLevel * 26;
   }
-}
+
