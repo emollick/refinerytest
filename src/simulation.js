@@ -7,6 +7,7 @@ const PRODUCT_LABELS = {
   jet: "jet fuel",
 };
 
+
 const HOURS_PER_DAY = 24;
 
 export class RefinerySimulation {
@@ -74,6 +75,7 @@ export class RefinerySimulation {
     this.directives = [];
     this.directiveStats = { total: 0, completed: 0, failed: 0 };
     this._seedDirectives();
+
 
     this.logs = [];
     this.pushLog(
@@ -565,7 +567,6 @@ export class RefinerySimulation {
     this.flows.toExport = result.gasoline + result.diesel + result.jet;
 
     this._updateDirectives(hours, { shipments: logisticsReport, metrics: this.metrics });
-
     this._updateScorecard({
       profitPerHour,
       crudeThroughput,
@@ -832,7 +833,6 @@ export class RefinerySimulation {
     }
     return "Plant stabilizing…";
   }
-
   _initStorage() {
     const capacity = { gasoline: 220, diesel: 180, jet: 140 };
     return {
@@ -1179,7 +1179,6 @@ export class RefinerySimulation {
       }
     });
   }
-
   getLogisticsState() {
     return {
       storage: {
@@ -1194,4 +1193,5 @@ export class RefinerySimulation {
   getDirectives() {
     return this.directives.map((directive) => ({ ...directive }));
   }
+
 }

@@ -904,6 +904,7 @@ body {
   border-bottom-color: #ffffff;
 }
 
+
 #event-log {
   list-style: none;
   margin: 0;
@@ -1200,6 +1201,7 @@ body {
 .directive.failed .directive-progress .fill {
   background: linear-gradient(90deg, rgba(244, 132, 132, 0.9), rgba(211, 72, 72, 0.95));
 }
+
 
 .about-window {
   max-width: 720px;

@@ -1,8 +1,10 @@
+
 const PRODUCT_LABELS = {
   gasoline: "Gasoline",
   diesel: "Diesel",
   jet: "Jet Fuel",
 };
+
 
 export class UIController {
   constructor(simulation) {
@@ -51,6 +53,7 @@ export class UIController {
       shipmentList: document.getElementById("shipment-list"),
       shipmentReliability: document.getElementById("shipment-reliability"),
       directiveList: document.getElementById("directive-list"),
+
     };
 
     this.profitFormatter = new Intl.NumberFormat("en-US", {
@@ -225,6 +228,7 @@ export class UIController {
   }
 
   update(logisticsState) {
+
     const metrics = this.simulation.getMetrics();
     this._renderMetrics(metrics);
     this._renderLogs();
@@ -238,6 +242,7 @@ export class UIController {
     const logistics = logisticsState || this.simulation.getLogisticsState();
     this._renderLogistics(logistics);
     this._renderDirectives(this.simulation.getDirectives());
+
   }
 
   refreshControls() {
@@ -652,6 +657,7 @@ export class UIController {
     }
     return `${prefix}${h}h ${String(m).padStart(2, "0")}m`;
   }
+
 
   _updateClock() {
     if (!this.elements.clock) return;
