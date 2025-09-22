@@ -318,13 +318,15 @@ const toolbarPresetButtons = document.querySelectorAll("[data-preset]");
 const toolbarUnitButtons = document.querySelectorAll("[data-unit-target]");
 const toolbarScenarioButtons = document.querySelectorAll("[data-scenario]");
 
+// Preset buttons
 toolbarPresetButtons.forEach((button) => {
   button.addEventListener("click", () => {
     const preset = button.dataset.preset;
-    applyPreset(preset);
+    if (preset) applyPreset(preset);
   });
 });
 
+// Unit select buttons
 toolbarUnitButtons.forEach((button) => {
   button.addEventListener("click", () => {
     const target = button.dataset.unitTarget || null;
@@ -333,6 +335,7 @@ toolbarUnitButtons.forEach((button) => {
   });
 });
 
+// Scenario buttons
 toolbarScenarioButtons.forEach((button) => {
   button.addEventListener("click", () => {
     const scenario = button.dataset.scenario;
@@ -343,6 +346,7 @@ toolbarScenarioButtons.forEach((button) => {
   });
 });
 
+// Sliders break the preset "active" state
 const sliderInputs = document.querySelectorAll('#hud input[type="range"]');
 sliderInputs.forEach((input) => {
   input.addEventListener("input", () => {
@@ -354,6 +358,7 @@ sliderInputs.forEach((input) => {
   });
 });
 
+// Keep toolbar in sync if the scenario dropdown exists in the UI
 if (ui.elements?.scenario) {
   ui.elements.scenario.addEventListener("change", (event) => {
     updateScenarioButtons(event.target.value);
