@@ -43,8 +43,10 @@ if (!isWebGLAvailable()) {
   throw new Error("WebGL not supported in this environment.");
 }
 
-const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true });
-renderer.setPixelRatio(1);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.5));
+
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 sceneContainer.appendChild(renderer.domElement);
 renderer.domElement.classList.add("scene-canvas");
@@ -52,8 +54,11 @@ renderer.domElement.classList.add("scene-canvas");
 const scene = new THREE.Scene();
 
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
-const BASE_VIEW = 110;
-camera.position.set(120, 145, 120);
+
+const BASE_VIEW = 82;
+const MIN_VIEW = 18;
+const MAX_VIEW = 180;
+camera.position.set(92, 128, 92);
 const cameraTarget = new THREE.Vector3(0, 0, 0);
 camera.lookAt(cameraTarget);
 const cameraOffset = camera.position.clone().sub(cameraTarget);
@@ -98,6 +103,9 @@ if (typeof ui.setModeBadge === "function") {
   ui.setModeBadge("AUTO");
 }
 
+const processTopology = simulation.getProcessTopology?.() || {};
+const mapStatusPanel = document.querySelector(".map-status");
+
 const MAP_COLS = 16;
 const MAP_ROWS = 12;
 const TILE_SIZE = 6;
@@ -129,6 +137,9 @@ let gridVisible = true;
 let flowOverlayVisible = true;
 let selectedUnitId = null;
 let activeMenu = null;
+const unitConnectionIndex = buildUnitConnectionIndex(processTopology);
+const highlightedPipelines = new Set();
+
 const gaugeColors = {
   good: new THREE.Color(0x6ae28a),
   warn: new THREE.Color(0xf2d06b),
@@ -287,6 +298,9 @@ buildDecor();
 populateScenarioMenu();
 populateUnitMenu();
 
+buildProcessLegend();
+
+
 const PRESETS = {
   auto: {
     label: "AUTO",
@@ -308,8 +322,10 @@ const PRESETS = {
   },
   shutdown: {
     label: "SHUTDN",
-    crude: 60,
-    focus: 0.42,
+
+    crude: 0,
+    focus: 0.5,
+
     maintenance: 0.82,
     safety: 0.72,
     environment: 0.55,
@@ -322,7 +338,6 @@ let activePreset = "auto";
 const toolbarPresetButtons = document.querySelectorAll("[data-preset]");
 const toolbarUnitButtons = document.querySelectorAll("[data-unit-target]");
 const toolbarScenarioButtons = document.querySelectorAll("[data-scenario]");
-
 
 toolbarPresetButtons.forEach((button) => {
   button.addEventListener("click", () => {
@@ -408,11 +423,12 @@ function animate() {
 
   simulation.update(delta);
   const logisticsState = simulation.getLogisticsState();
-  ui.update(logisticsState);
-
+  const flows = simulation.getFlows();
+  ui.update(logisticsState, flows);
 
   updateUnits(elapsed);
-  updatePipelines(simulation.getFlows(), elapsed);
+  updatePipelines(flows, elapsed);
+
   updateEnvironment(elapsed);
   updateLogisticsVisuals(logisticsState, elapsed);
   refreshUnitPulse(elapsed);
@@ -432,6 +448,13 @@ function applyPreset(name, options = {}) {
   simulation.setParam("maintenance", preset.maintenance);
   simulation.setParam("safety", preset.safety);
   simulation.setParam("environment", preset.environment);
+
+  if (name === "shutdown") {
+    simulation.triggerEmergencyShutdown();
+  } else {
+    simulation.releaseEmergencyShutdown();
+  }
+
 
   ui.refreshControls();
   updatePresetButtons(name);
@@ -625,7 +648,9 @@ function setGridVisibility(visible) {
 function setFlowVisibility(visible) {
   flowOverlayVisible = visible;
   pipelineVisuals.forEach((visual) => {
-    visual.group.visible = visible;
+    const isHighlighted = highlightedPipelines.has(visual.id);
+    visual.group.visible = visible || isHighlighted;
+
   });
   updateToggleButton(flowToggleButton, flowOverlayVisible, "Hide Flow Glow", "Show Flow Glow");
 }
@@ -880,7 +905,9 @@ function refreshUnitPulse(time, force = false) {
     entry.mode.dataset.mode = unit.mode || "balanced";
     entry.status.textContent = formatUnitStatus(unit);
     entry.incidents.textContent = formatIncidentCount(unit.incidents || 0);
-    entry.item.classList.toggle("offline", unit.status !== "online");
+    entry.item.classList.toggle("offline", unit.status === "offline");
+    entry.item.classList.toggle("standby", unit.status === "standby");
+
     entry.item.classList.toggle("overload", utilization > 1);
     entry.item.classList.toggle("selected", selectedUnitId === unit.id);
     entry.item.classList.toggle("alerting", Boolean(unit.alert));
@@ -908,6 +935,13 @@ function formatUnitStatus(unit) {
   if (unit.status === "online") {
     return unit.alert ? `Online • ${unit.alert}` : "Online";
   }
+  if (unit.status === "standby") {
+    if (unit.emergencyOffline) {
+      return "Standby • E-stop";
+    }
+    return "Standby";
+  }
+
   const minutes = Math.max(1, Math.ceil(unit.downtime || 0));
   return `Offline (${minutes}m)`;
 }
@@ -1721,7 +1755,8 @@ function handleWheel(event) {
   event.preventDefault();
   const direction = Math.sign(event.deltaY);
   const zoomFactor = direction > 0 ? 1.12 : 0.88;
-  viewHeight = THREE.MathUtils.clamp(viewHeight * zoomFactor, 55, 170);
+  viewHeight = THREE.MathUtils.clamp(viewHeight * zoomFactor, MIN_VIEW, MAX_VIEW);
+
   const aspect = renderer.domElement.clientWidth / renderer.domElement.clientHeight;
   updateCamera(aspect);
 }
@@ -1747,6 +1782,13 @@ function panCamera(deltaX, deltaY) {
   panOffset.y = 0;
 
   cameraTarget.add(panOffset);
+  constrainCameraTarget();
+
+  camera.position.copy(cameraTarget).add(cameraOffset);
+  camera.lookAt(cameraTarget);
+}
+
+function constrainCameraTarget() {
 
   const bounds = {
     minX: -MAP_WIDTH / 2 + TILE_SIZE * 1.5,
@@ -1758,8 +1800,6 @@ function panCamera(deltaX, deltaY) {
   cameraTarget.x = THREE.MathUtils.clamp(cameraTarget.x, bounds.minX, bounds.maxX);
   cameraTarget.z = THREE.MathUtils.clamp(cameraTarget.z, bounds.minZ, bounds.maxZ);
 
-  camera.position.copy(cameraTarget).add(cameraOffset);
-  camera.lookAt(cameraTarget);
 }
 
 function selectUnitAtPointer(event) {
@@ -1781,10 +1821,70 @@ function selectUnitAtPointer(event) {
   ui.selectUnit(null);
 }
 
-function setSelectedUnit(unitId) {
+function setSelectedUnit(unitId, options = {}) {
   selectedUnitId = unitId;
   updateUnitButtons(unitId);
+  if (unitId) {
+    highlightPipelinesForUnit(unitId);
+    updateProcessLegendSelection(unitId);
+    if (!options.suppressFocus) {
+      focusCameraOnUnit(unitId);
+    }
+  } else {
+    clearPipelineHighlight();
+    updateProcessLegendSelection(null);
+  }
   refreshUnitPulse(0, true);
+}
+
+function focusCameraOnUnit(unitId) {
+  if (!unitId) {
+    return;
+  }
+  const visual = unitVisuals.get(unitId);
+  if (!visual) {
+    return;
+  }
+  const target = visual.group.position.clone();
+  target.y = 0;
+  cameraTarget.copy(target);
+  constrainCameraTarget();
+  viewHeight = THREE.MathUtils.clamp(viewHeight * 0.75, MIN_VIEW, viewHeight);
+  const aspect = renderer.domElement.clientWidth / Math.max(1, renderer.domElement.clientHeight);
+  updateCamera(aspect);
+}
+
+function highlightPipelinesForUnit(unitId) {
+  highlightedPipelines.clear();
+  if (unitConnectionIndex.has(unitId)) {
+    unitConnectionIndex.get(unitId).forEach((pipelineId) => {
+      highlightedPipelines.add(pipelineId);
+    });
+  }
+  pipelineVisuals.forEach((visual) => {
+    const isHighlighted = highlightedPipelines.has(visual.id);
+    visual.group.visible = flowOverlayVisible || isHighlighted;
+  });
+}
+
+function clearPipelineHighlight() {
+  highlightedPipelines.clear();
+  pipelineVisuals.forEach((visual) => {
+    visual.group.visible = flowOverlayVisible;
+  });
+}
+
+function updateProcessLegendSelection(unitId) {
+  if (!mapStatusPanel) {
+    return;
+  }
+  mapStatusPanel
+    .querySelectorAll("#process-legend li")
+    .forEach((item) => {
+      const isActive = item.dataset.unit === unitId;
+      item.classList.toggle("active", isActive);
+      item.setAttribute("aria-selected", isActive ? "true" : "false");
+    });
 }
 
 function updateUnits(time) {
@@ -1793,33 +1893,42 @@ function updateUnits(time) {
     if (!visual) return;
     const utilization = unit.utilization || 0;
     const integrity = THREE.MathUtils.clamp(unit.integrity, 0, 1);
-    const statusColor = unit.status === "online" ? visual.alertColor : new THREE.Color(0xd84545);
-    const mix = unit.status === "online" ? 1 - integrity : 0.85;
+    const isOnline = unit.status === "online";
+    const isStandby = unit.status === "standby";
+    const statusColor = isOnline
+      ? visual.alertColor
+      : isStandby
+      ? new THREE.Color(0xf2d06b)
+      : new THREE.Color(0xd84545);
+    const mix = isOnline ? 1 - integrity : isStandby ? 0.4 : 0.85;
     const targetColor = visual.baseColor.clone().lerp(statusColor, THREE.MathUtils.clamp(mix, 0, 1));
     visual.baseMaterial.color.copy(targetColor);
 
     visual.accentMaterials.forEach((material, index) => {
       const pulse = (Math.sin(time * 2.2 + index) + 1) / 2;
+      const accentTarget = isOnline ? 0.25 : isStandby ? 0.45 : 0.65;
       const accentColor = visual.accentColor
         .clone()
-        .lerp(statusColor, unit.status === "online" ? 0.25 : 0.65)
+        .lerp(statusColor, accentTarget)
         .lerp(visual.baseColor, 0.25 + pulse * 0.15);
       material.color.copy(accentColor);
     });
 
     if (visual.statusLamp) {
-      const lampColor =
-        unit.status === "online"
-          ? integrity > 0.45
-            ? 0x74d77a
-            : 0xf2d06b
-          : 0xff6b5a;
+
+      const lampColor = isOnline
+        ? integrity > 0.45
+          ? 0x74d77a
+          : 0xf2d06b
+        : isStandby
+        ? 0xf8c16e
+        : 0xff6b5a;
       visual.statusLamp.material.color.setHex(lampColor);
-      visual.statusLamp.material.opacity = 0.7 + utilization * 0.3;
+      visual.statusLamp.material.opacity = isStandby ? 0.55 : 0.7 + utilization * 0.3;
     }
 
     if (visual.highlight) {
-      const baseOpacity = unit.status === "online" ? 0.2 : 0.3;
+      const baseOpacity = isOnline ? 0.2 : isStandby ? 0.26 : 0.3;
       const pulse = Math.abs(Math.sin(time * 2.6 + visual.phase)) * (0.25 + utilization * 0.35);
       const selectedBoost = selectedUnitId === unit.id ? 0.35 : 0;
       visual.highlight.material.opacity = baseOpacity + pulse + selectedBoost;
@@ -1831,7 +1940,8 @@ function updateUnits(time) {
     }
 
     if (visual.gauge) {
-      updateGauge(visual.gauge, utilization, integrity, unit.status === "online", selectedUnitId === unit.id);
+      updateGauge(visual.gauge, utilization, integrity, isOnline, selectedUnitId === unit.id);
+
       billboard(visual.gauge.group);
     }
 
@@ -1850,11 +1960,19 @@ function updatePipelines(flows, time) {
       ? THREE.MathUtils.clamp(flow / visual.config.capacity, 0, 1.4)
       : 0;
     const pulse = Math.max(0, Math.sin(time * 3 + visual.config.phase));
+    const isHighlighted = highlightedPipelines.has(visual.id);
+    visual.group.visible = flowOverlayVisible || isHighlighted;
     visual.materials.forEach((material) => {
-      material.opacity = 0.18 + normalized * 0.5 + pulse * 0.12;
-      const emissive = visual.baseColor.clone().multiplyScalar(0.25 + normalized * 1.4 + pulse * 0.4);
+      const baseOpacity = 0.16 + normalized * 0.45 + pulse * 0.1;
+      const highlightBoost = isHighlighted ? 0.32 : 0;
+      material.opacity = Math.min(1, baseOpacity + highlightBoost);
+      const emissiveStrength = 0.25 + normalized * 1.4 + pulse * 0.4 + (isHighlighted ? 0.6 : 0);
+      const emissive = visual.baseColor.clone().multiplyScalar(emissiveStrength);
       material.emissive.copy(emissive);
-      material.color.copy(visual.baseColor.clone().lerp(new THREE.Color(0xffffff), normalized * 0.2));
+      const colorLift = isHighlighted ? 0.35 : 0.18;
+      material.color.copy(
+        visual.baseColor.clone().lerp(new THREE.Color(isHighlighted ? 0xffffff : 0xddeaff), normalized * colorLift)
+      );
     });
   });
 }
@@ -1921,6 +2039,92 @@ function updateDockActivity(shipments = [], time) {
   const base = pending.length ? Math.min(0.85, 0.18 + pending.length * 0.22) : 0.08;
   const pulse = Math.abs(Math.sin(time * (urgent ? 6 : 3))) * 0.35;
   dockVisual.beacon.material.opacity = Math.min(0.9, base + pulse);
+}
+
+function buildUnitConnectionIndex(topology) {
+  const map = new Map();
+  if (!topology) {
+    return map;
+  }
+  Object.entries(topology).forEach(([unitId, entry]) => {
+    const pipelines = new Set();
+    (entry.feeds || []).forEach((item) => {
+      if (item && item.pipeline) {
+        pipelines.add(item.pipeline);
+      }
+    });
+    (entry.outputs || []).forEach((item) => {
+      if (item && item.pipeline) {
+        pipelines.add(item.pipeline);
+      }
+    });
+    map.set(unitId, Array.from(pipelines));
+  });
+  return map;
+}
+
+function buildProcessLegend() {
+  if (!mapStatusPanel || !processTopology) {
+    return;
+  }
+  if (mapStatusPanel.querySelector("#process-legend")) {
+    return;
+  }
+  const legend = document.createElement("div");
+  legend.id = "process-legend";
+  const heading = document.createElement("h4");
+  heading.textContent = "Process Flow";
+  legend.appendChild(heading);
+  const list = document.createElement("ol");
+  const sequence = ["distillation", "reformer", "fcc", "hydrocracker", "alkylation", "sulfur"];
+  sequence.forEach((unitId) => {
+    const entry = processTopology[unitId];
+    if (!entry) {
+      return;
+    }
+    const item = document.createElement("li");
+    item.dataset.unit = unitId;
+    item.setAttribute("role", "button");
+    item.tabIndex = 0;
+    const name = document.createElement("span");
+    name.className = "process-step-name";
+    name.textContent = entry.name || unitId;
+    item.appendChild(name);
+    if (entry.summary) {
+      const summary = document.createElement("span");
+      summary.className = "process-step-summary";
+      summary.textContent = entry.summary;
+      item.appendChild(summary);
+    }
+    item.addEventListener("click", () => {
+      setSelectedUnit(unitId);
+      ui.selectUnit(unitId);
+    });
+    item.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        setSelectedUnit(unitId);
+        ui.selectUnit(unitId);
+      }
+    });
+    const previewPipelines = () => {
+      highlightPipelinesForUnit(unitId);
+    };
+    const resetPipelines = () => {
+      if (selectedUnitId) {
+        highlightPipelinesForUnit(selectedUnitId);
+      } else {
+        clearPipelineHighlight();
+      }
+    };
+    item.addEventListener("mouseenter", previewPipelines);
+    item.addEventListener("focus", previewPipelines);
+    item.addEventListener("mouseleave", resetPipelines);
+    item.addEventListener("blur", resetPipelines);
+    list.appendChild(item);
+  });
+  legend.appendChild(list);
+  mapStatusPanel.appendChild(legend);
 }
 
 

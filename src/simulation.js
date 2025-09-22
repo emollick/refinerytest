@@ -7,7 +7,6 @@ const PRODUCT_LABELS = {
   jet: "jet fuel",
 };
 
-
 const HOURS_PER_DAY = 24;
 
 export class RefinerySimulation {
@@ -75,6 +74,10 @@ export class RefinerySimulation {
     this.directives = [];
     this.directiveStats = { total: 0, completed: 0, failed: 0 };
     this._seedDirectives();
+
+    this.unitOverrides = {};
+    this.emergencyShutdown = false;
+    this.processTopology = this._createTopology();
 
 
     this.logs = [];
@@ -189,6 +192,73 @@ export class RefinerySimulation {
     ];
   }
 
+  _createTopology() {
+    return {
+      distillation: {
+        name: "Crude Distillation Unit",
+        summary: "Primary separation of crude into gas, naphtha, kerosene, diesel, and resid pools.",
+        feeds: [{ label: "Crude feed", kind: "feed" }],
+        outputs: [
+          { label: "Naphtha to Reformer", unit: "reformer", pipeline: "toReformer" },
+          { label: "Heavy gas oil to FCC", unit: "fcc", pipeline: "toCracker" },
+          { label: "VGO / resid to Hydrocracker", unit: "hydrocracker", pipeline: "toHydrocracker" },
+          { label: "LPG cut to Alkylation", unit: "alkylation", pipeline: "toAlkylation" },
+        ],
+      },
+      reformer: {
+        name: "Naphtha Reformer",
+        summary: "Upgrades naphtha into high-octane reformate and generates hydrogen for other units.",
+        feeds: [{ label: "Naphtha from CDU", unit: "distillation", pipeline: "toReformer" }],
+        outputs: [
+          { label: "Reformate to gasoline pool", kind: "product", pipeline: "toExport" },
+          { label: "Hydrogen to Hydrocracker", unit: "hydrocracker" },
+        ],
+      },
+      fcc: {
+        name: "Catalytic Cracker",
+        summary: "Cracks heavy gas oils into lighter products with high gasoline yield.",
+        feeds: [{ label: "Heavy gas oil / resid", unit: "distillation", pipeline: "toCracker" }],
+        outputs: [
+          { label: "Blendstock to gasoline", kind: "product", pipeline: "toExport" },
+          { label: "Cycle oil to diesel pool", kind: "product", pipeline: "toExport" },
+          { label: "LPG to Alkylation", unit: "alkylation" },
+        ],
+      },
+      hydrocracker: {
+        name: "Hydrocracker",
+        summary: "Adds hydrogen to heavier fractions for jet and diesel production.",
+        feeds: [
+          { label: "VGO / resid", unit: "distillation", pipeline: "toHydrocracker" },
+          { label: "Hydrogen from Reformer", unit: "reformer" },
+        ],
+        outputs: [
+          { label: "Jet fuel blend", kind: "product", pipeline: "toExport" },
+          { label: "Premium diesel", kind: "product", pipeline: "toExport" },
+          { label: "Gasoline upgrade", kind: "product", pipeline: "toExport" },
+        ],
+      },
+      alkylation: {
+        name: "Alkylation",
+        summary: "Combines light olefins and isobutane into high-octane alkylate.",
+        feeds: [
+          { label: "LPG from CDU / FCC", unit: "distillation", pipeline: "toAlkylation" },
+          { label: "LPG from FCC", unit: "fcc" },
+        ],
+        outputs: [
+          { label: "Alkylate to gasoline", kind: "product" },
+          { label: "Excess LPG to export", pipeline: "toExport" },
+        ],
+      },
+      sulfur: {
+        name: "Sulfur Recovery",
+        summary: "Pulls sulfur out of resid streams to keep emissions under control.",
+        feeds: [{ label: "Sour resid / offgas", unit: "distillation" }],
+        outputs: [{ label: "Recovered sulfur", kind: "byproduct" }],
+      },
+    };
+  }
+
+
   _unit(id, name, capacity, category) {
     return {
       id,
@@ -203,6 +273,13 @@ export class RefinerySimulation {
       incidents: 0,
       alert: null,
       alertTimer: 0,
+
+      manualOffline: false,
+      emergencyOffline: false,
+      overrideThrottle: 1,
+      alertDetail: null,
+      lastIncident: null,
+
     };
   }
 
@@ -276,6 +353,9 @@ export class RefinerySimulation {
     this.directives = [];
     this.directiveStats = { total: 0, completed: 0, failed: 0 };
     this._seedDirectives();
+    this.unitOverrides = {};
+    this.emergencyShutdown = false;
+
     this.units.forEach((unit) => {
       unit.throughput = 0;
       unit.utilization = 0;
@@ -285,6 +365,11 @@ export class RefinerySimulation {
       unit.incidents = 0;
       unit.alert = null;
       unit.alertTimer = 0;
+      unit.manualOffline = false;
+      unit.emergencyOffline = false;
+      unit.overrideThrottle = 1;
+      unit.alertDetail = null;
+      unit.lastIncident = null;
     });
     this.performanceHistory = [];
     this.logs = [];
@@ -341,14 +426,21 @@ export class RefinerySimulation {
     const crudeSetting = this.params.crudeIntake;
     const crudeAvailable = crudeSetting * scenario.crudeMultiplier;
 
-    const distillation = this.unitMap.distillation;
-    const distOnline = this._unitIsAvailable(distillation);
-    const distCapacity = distOnline ? distillation.capacity : 0;
+
+    const distState = this._resolveUnitState("distillation");
+    const distillation = distState.unit;
+    const distCapacity =
+      distillation && distState.online
+        ? distillation.capacity * clamp(distState.throttle, 0, 1.2)
+        : 0;
     const crudeThroughput = Math.min(crudeAvailable, distCapacity);
-    distillation.throughput = crudeThroughput;
-    distillation.utilization = distCapacity
-      ? crudeThroughput / distCapacity
-      : 0;
+    if (distillation) {
+      distillation.throughput = crudeThroughput;
+      distillation.utilization = distCapacity
+        ? crudeThroughput / Math.max(1, distillation.capacity)
+        : 0;
+      this._updateUnitMode(distillation);
+    }
 
     const focus = clamp(this.params.productFocus, 0, 1);
     const centered = focus - 0.5;
@@ -403,13 +495,20 @@ export class RefinerySimulation {
     const demandGasolineBias = scenario.gasolineBias;
     const demandJetBias = scenario.jetBias;
 
-    const reformer = this.unitMap.reformer;
-    const reformerOnline = this._unitIsAvailable(reformer);
-    const reformerCapacity = reformerOnline ? reformer.capacity : 0;
+    const reformerState = this._resolveUnitState("reformer");
+    const reformer = reformerState.unit;
+    const reformerCapacity =
+      reformer && reformerState.online
+        ? reformer.capacity * clamp(reformerState.throttle, 0, 1.2)
+        : 0;
     const reformFeed = Math.min(naphthaPool, reformerCapacity);
     naphthaPool -= reformFeed;
-    reformer.throughput = reformFeed;
-    reformer.utilization = reformerCapacity ? reformFeed / reformerCapacity : 0;
+    if (reformer) {
+      reformer.throughput = reformFeed;
+      reformer.utilization = reformerCapacity > 0 ? reformFeed / reformerCapacity : 0;
+      this._updateUnitMode(reformer);
+    }
+
 
     const reformate = reformFeed * 0.92;
     const reformHydrogen = reformFeed * 0.05;
@@ -418,9 +517,11 @@ export class RefinerySimulation {
     result.hydrogen += reformHydrogen;
     result.waste += reformLoss;
 
-    const fcc = this.unitMap.fcc;
-    const fccOnline = this._unitIsAvailable(fcc);
-    const fccCapacity = fccOnline ? fcc.capacity : 0;
+
+    const fccState = this._resolveUnitState("fcc");
+    const fcc = fccState.unit;
+    const fccCapacity =
+      fcc && fccState.online ? fcc.capacity * clamp(fccState.throttle, 0, 1.2) : 0;
     const heavyAvailableForFcc = heavyPool + residPool * 0.6;
     const fccFeed = Math.min(heavyAvailableForFcc, fccCapacity);
     const heavyUsedByFcc = Math.min(heavyPool, fccFeed * 0.7);
@@ -428,8 +529,13 @@ export class RefinerySimulation {
     const residUsedByFcc = Math.min(residPool, fccFeed - heavyUsedByFcc);
     residPool -= residUsedByFcc;
 
-    fcc.throughput = fccFeed;
-    fcc.utilization = fccCapacity ? fccFeed / fccCapacity : 0;
+
+    if (fcc) {
+      fcc.throughput = fccFeed;
+      fcc.utilization = fccCapacity > 0 ? fccFeed / fccCapacity : 0;
+      this._updateUnitMode(fcc);
+    }
+
 
     const fccGasoline = fccFeed * 0.54;
     const fccDiesel = fccFeed * 0.12;
@@ -441,9 +547,13 @@ export class RefinerySimulation {
     result.waste += fccLoss;
     flare += fccLoss * 0.5;
 
-    const hydrocracker = this.unitMap.hydrocracker;
-    const hydroOnline = this._unitIsAvailable(hydrocracker);
-    const hydroCapacity = hydroOnline ? hydrocracker.capacity : 0;
+    const hydroState = this._resolveUnitState("hydrocracker");
+    const hydrocracker = hydroState.unit;
+    const hydroCapacity =
+      hydrocracker && hydroState.online
+        ? hydrocracker.capacity * clamp(hydroState.throttle, 0, 1.2)
+        : 0;
+
     const hydroFeedAvailable = heavyPool + residPool + dieselPool * 0.25;
     const hydroFeed = Math.min(hydroFeedAvailable, hydroCapacity);
 
@@ -454,8 +564,12 @@ export class RefinerySimulation {
     const dieselUsedHydro = Math.min(dieselPool * 0.5, hydroFeed - heavyUsedHydro - residUsedHydro);
     dieselPool -= dieselUsedHydro;
 
-    hydrocracker.throughput = hydroFeed;
-    hydrocracker.utilization = hydroCapacity ? hydroFeed / hydroCapacity : 0;
+    if (hydrocracker) {
+      hydrocracker.throughput = hydroFeed;
+      hydrocracker.utilization = hydroCapacity > 0 ? hydroFeed / hydroCapacity : 0;
+      this._updateUnitMode(hydrocracker);
+    }
+
 
     const hydroGasoline = hydroFeed * 0.42;
     const hydroDiesel = hydroFeed * 0.3;
@@ -467,14 +581,22 @@ export class RefinerySimulation {
     result.hydrogen += hydroFeed * 0.04;
     result.waste += hydroLoss;
 
-    const alkylation = this.unitMap.alkylation;
-    const alkOnline = this._unitIsAvailable(alkylation);
-    const alkCapacity = alkOnline ? alkylation.capacity : 0;
+
+    const alkylationState = this._resolveUnitState("alkylation");
+    const alkylation = alkylationState.unit;
+    const alkCapacity =
+      alkylation && alkylationState.online
+        ? alkylation.capacity * clamp(alkylationState.throttle, 0, 1.2)
+        : 0;
     const alkFeed = Math.min(lpgPool, alkCapacity);
     lpgPool -= alkFeed;
 
-    alkylation.throughput = alkFeed;
-    alkylation.utilization = alkCapacity ? alkFeed / alkCapacity : 0;
+    if (alkylation) {
+      alkylation.throughput = alkFeed;
+      alkylation.utilization = alkCapacity > 0 ? alkFeed / alkCapacity : 0;
+      this._updateUnitMode(alkylation);
+    }
+
 
     const alkGasoline = alkFeed * 0.88;
     const alkLoss = alkFeed * 0.06;
@@ -482,13 +604,19 @@ export class RefinerySimulation {
     result.lpg += lpgPool;
     result.waste += alkLoss;
 
-    const sulfur = this.unitMap.sulfur;
-    const sulfurOnline = this._unitIsAvailable(sulfur);
-    const sulfurCapacity = sulfurOnline ? sulfur.capacity : 0;
+
+    const sulfurState = this._resolveUnitState("sulfur");
+    const sulfur = sulfurState.unit;
+    const sulfurCapacity =
+      sulfur && sulfurState.online ? sulfur.capacity * clamp(sulfurState.throttle, 0, 1.2) : 0;
     const sulfurFeed = Math.min(residPool + heavyPool, sulfurCapacity);
     const sulfurRemoved = sulfurFeed * (0.55 + this.params.environment * 0.4);
-    sulfur.throughput = sulfurFeed;
-    sulfur.utilization = sulfurCapacity ? sulfurFeed / sulfurCapacity : 0;
+    if (sulfur) {
+      sulfur.throughput = sulfurFeed;
+      sulfur.utilization = sulfurCapacity > 0 ? sulfurFeed / sulfurCapacity : 0;
+      this._updateUnitMode(sulfur);
+    }
+
     residPool -= sulfurFeed * 0.6;
     heavyPool -= sulfurFeed * 0.4;
     result.sulfur += sulfurRemoved;
@@ -567,6 +695,7 @@ export class RefinerySimulation {
     this.flows.toExport = result.gasoline + result.diesel + result.jet;
 
     this._updateDirectives(hours, { shipments: logisticsReport, metrics: this.metrics });
+
     this._updateScorecard({
       profitPerHour,
       crudeThroughput,
@@ -601,6 +730,67 @@ export class RefinerySimulation {
     return true;
   }
 
+  _resolveUnitState(unitId) {
+    const unit = this.unitMap[unitId];
+    if (!unit) {
+      return { unit: null, online: false, throttle: 0 };
+    }
+
+    const override = this.unitOverrides[unitId] || {};
+    const throttle =
+      typeof override.throttle === "number" ? clamp(override.throttle, 0, 1.2) : 1;
+
+    const available = this._unitIsAvailable(unit);
+    unit.overrideThrottle = override.offline ? 0 : throttle;
+
+    if (override.offline) {
+      if (unit.downtime <= 0 && unit.status !== "offline") {
+        unit.status = "standby";
+      }
+      unit.manualOffline = !unit.emergencyOffline;
+      unit.throughput = 0;
+      unit.utilization = 0;
+      return { unit, online: false, throttle: 0 };
+    }
+
+    unit.manualOffline = false;
+
+    if (!available) {
+      return { unit, online: false, throttle: 0 };
+    }
+
+    if (unit.status === "standby") {
+      unit.status = "online";
+    }
+
+    return { unit, online: true, throttle };
+  }
+
+  _updateUnitMode(unit) {
+    if (!unit) {
+      return;
+    }
+    if (unit.status === "offline") {
+      unit.mode = "offline";
+      return;
+    }
+    if (unit.status === "standby" || unit.manualOffline || unit.emergencyOffline) {
+      unit.mode = "standby";
+      return;
+    }
+    const utilization = unit.utilization || 0;
+    if (utilization > 1.15) {
+      unit.mode = "overdrive";
+    } else if (utilization > 0.95) {
+      unit.mode = "push";
+    } else if (utilization < 0.45) {
+      unit.mode = "idle";
+    } else {
+      unit.mode = "balanced";
+    }
+  }
+
+
   _updateReliability(units, context) {
     const maintenance = this.params.maintenance;
     const safety = this.params.safety;
@@ -612,6 +802,12 @@ export class RefinerySimulation {
 
     Object.values(units).forEach((unit) => {
       if (!unit) return;
+
+      if (unit.status === "standby") {
+        integritySum += unit.integrity;
+        return;
+      }
+
       const utilization = unit.utilization || 0;
       const baseWear = 0.004 * context.hours;
       const stressWear = Math.max(0, utilization - 1) * 0.04 * context.hours;
@@ -634,11 +830,20 @@ export class RefinerySimulation {
           unit.incidents += 1;
           incidents += severity === "danger" ? 2 : 1;
           penalty += severity === "danger" ? 320 : 140;
+          const cause = this._describeIncidentCause({
+            overload,
+            maintenance,
+            safety,
+            scenario,
+            integrity: unit.integrity,
+          });
+          const message = `${unit.name} tripped offline after a ${
+            severity === "danger" ? "critical" : "process"
+          } upset (${cause}).`;
           this.pushLog(
             severity,
-            `${unit.name} tripped offline after a ${
-              severity === "danger" ? "critical" : "process"
-            } upset.`,
+            message,
+
             { unitId: unit.id }
           );
           if (severity === "danger") {
@@ -650,6 +855,18 @@ export class RefinerySimulation {
           }
           unit.alert = severity;
           unit.alertTimer = Math.max(unit.alertTimer, severity === "danger" ? 180 : 90);
+
+          unit.alertDetail = {
+            severity,
+            cause,
+            recordedAt: this._formatTime(),
+            integrity: unit.integrity,
+            overload,
+            maintenance,
+            safety,
+          };
+          unit.lastIncident = { ...unit.alertDetail };
+
         }
       }
     });
@@ -665,6 +882,41 @@ export class RefinerySimulation {
       incidentPenalty: penalty,
     };
   }
+
+  _describeIncidentCause(details) {
+    const reasons = [];
+    if (details.overload > 0.25) {
+      reasons.push("overpressure from aggressive throughput");
+    } else if (details.overload > 0.12) {
+      reasons.push("running above nameplate capacity");
+    }
+    if (details.integrity < 0.18) {
+      reasons.push("equipment fatigue from deferred maintenance");
+    } else if (details.integrity < 0.3) {
+      reasons.push("aging hardware under stress");
+    }
+    if (details.maintenance < 0.45) {
+      reasons.push("maintenance backlog");
+    }
+    if (details.safety < 0.4) {
+      reasons.push("thin safety coverage");
+    }
+    if (details.scenario?.riskMultiplier > 1.4) {
+      reasons.push("scenario hazards amplified the upset");
+    }
+    if (!reasons.length) {
+      reasons.push("process variability");
+    }
+    if (reasons.length === 1) {
+      return reasons[0];
+    }
+    if (reasons.length === 2) {
+      return `${reasons[0]} and ${reasons[1]}`;
+    }
+    const last = reasons.pop();
+    return `${reasons.join(", ")}, and ${last}`;
+  }
+
 
   getMetrics() {
     return { ...this.metrics };
@@ -833,6 +1085,7 @@ export class RefinerySimulation {
     }
     return "Plant stabilizing…";
   }
+
   _initStorage() {
     const capacity = { gasoline: 220, diesel: 180, jet: 140 };
     return {
@@ -1179,6 +1432,7 @@ export class RefinerySimulation {
       }
     });
   }
+
   getLogisticsState() {
     return {
       storage: {
@@ -1192,6 +1446,168 @@ export class RefinerySimulation {
 
   getDirectives() {
     return this.directives.map((directive) => ({ ...directive }));
+  }
+
+  getProcessTopology() {
+    return this.processTopology;
+  }
+
+  getUnitOverride(unitId) {
+    const override = this.unitOverrides[unitId];
+    if (!override) {
+      return { throttle: 1, offline: false };
+    }
+    return {
+      throttle: typeof override.throttle === "number" ? clamp(override.throttle, 0, 1.2) : 1,
+      offline: Boolean(override.offline),
+    };
+  }
+
+  getUnitOverrides() {
+    const map = {};
+    Object.entries(this.unitOverrides).forEach(([unitId, override]) => {
+      map[unitId] = {
+        throttle: typeof override.throttle === "number" ? clamp(override.throttle, 0, 1.2) : 1,
+        offline: Boolean(override.offline),
+      };
+    });
+    return map;
+  }
+
+  setUnitThrottle(unitId, fraction, options = {}) {
+    const unit = this.unitMap[unitId];
+    if (!unit) {
+      return;
+    }
+    const throttle = clamp(typeof fraction === "number" ? fraction : 1, 0, 1.2);
+    let override = this.unitOverrides[unitId];
+    if (!override) {
+      override = {};
+    }
+    if (throttle >= 0.99) {
+      delete override.throttle;
+    } else {
+      override.throttle = throttle;
+    }
+    unit.overrideThrottle = throttle;
+    if (override.offline) {
+      this.unitOverrides[unitId] = override;
+    } else if (override.throttle === undefined) {
+      delete this.unitOverrides[unitId];
+    } else {
+      this.unitOverrides[unitId] = override;
+    }
+    if (!options.quiet) {
+      this.pushLog(
+        "info",
+        `${unit.name} throughput target set to ${Math.round(throttle * 100)}%.`,
+        { unitId }
+      );
+    }
+  }
+
+  setUnitOffline(unitId, offline, options = {}) {
+    const unit = this.unitMap[unitId];
+    if (!unit) {
+      return;
+    }
+    if (options.emergencyOnly && !unit.emergencyOffline) {
+      return;
+    }
+    let override = this.unitOverrides[unitId];
+    if (!override) {
+      override = {};
+    }
+
+    if (offline) {
+      override.offline = true;
+      unit.manualOffline = !options.emergency;
+      unit.emergencyOffline = Boolean(options.emergency);
+      if (unit.downtime <= 0 && unit.status !== "offline") {
+        unit.status = "standby";
+      }
+      unit.throughput = 0;
+      unit.utilization = 0;
+      unit.overrideThrottle = 0;
+    } else {
+      if (options.emergencyOnly && !unit.emergencyOffline) {
+        return;
+      }
+      delete override.offline;
+      unit.emergencyOffline = false;
+      unit.manualOffline = false;
+      if (override.throttle === undefined) {
+        unit.overrideThrottle = 1;
+      } else {
+        unit.overrideThrottle = override.throttle;
+      }
+      if (unit.status === "standby" && unit.downtime <= 0) {
+        unit.status = "online";
+      }
+    }
+
+    if (override.offline || override.throttle !== undefined) {
+      this.unitOverrides[unitId] = override;
+    } else {
+      delete this.unitOverrides[unitId];
+    }
+
+    if (!options.quiet) {
+      this.pushLog(
+        offline ? "warning" : "info",
+        offline ? `${unit.name} placed in standby.` : `${unit.name} returned to service.`,
+        { unitId }
+      );
+    }
+  }
+
+  clearUnitOverride(unitId, options = {}) {
+    const unit = this.unitMap[unitId];
+    if (!unit) {
+      return;
+    }
+    delete this.unitOverrides[unitId];
+    unit.manualOffline = false;
+    unit.emergencyOffline = false;
+    unit.overrideThrottle = 1;
+    if (unit.status === "standby" && unit.downtime <= 0) {
+      unit.status = "online";
+    }
+    if (!options.quiet) {
+      this.pushLog("info", `${unit.name} reset to automatic control.`, { unitId });
+    }
+  }
+
+  setAllUnitsOffline(offline, options = {}) {
+    this.units.forEach((unit) => {
+      if (!unit) return;
+      if (offline) {
+        this.setUnitOffline(unit.id, true, { ...options, quiet: true });
+      } else if (!options.emergencyOnly || unit.emergencyOffline) {
+        this.setUnitOffline(unit.id, false, { ...options, quiet: true });
+      }
+    });
+  }
+
+  triggerEmergencyShutdown() {
+    if (this.emergencyShutdown) {
+      return;
+    }
+    this.emergencyShutdown = true;
+    this.setAllUnitsOffline(true, { emergency: true, quiet: true });
+    this.pushLog(
+      "warning",
+      "Emergency shutdown drill engaged. Crude charge isolated and units standing by."
+    );
+  }
+
+  releaseEmergencyShutdown() {
+    if (!this.emergencyShutdown) {
+      return;
+    }
+    this.emergencyShutdown = false;
+    this.setAllUnitsOffline(false, { emergencyOnly: true, quiet: true });
+    this.pushLog("info", "Emergency shutdown cleared; restart crews may warm up units.");
   }
 
 }

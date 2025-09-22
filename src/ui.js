@@ -13,6 +13,11 @@ export class UIController {
     this.lastLogSignature = "";
     this.modeFlashTimeout = null;
 
+    this.processTopology =
+      typeof simulation.getProcessTopology === "function" ? simulation.getProcessTopology() : {};
+    this.latestFlows = {};
+
+
     this.elements = {
       crude: document.getElementById("crude-input"),
       crudeValue: document.getElementById("crude-value"),
@@ -61,6 +66,9 @@ export class UIController {
       currency: "USD",
       maximumFractionDigits: 0,
     });
+
+    this.flowFormatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
+
 
     this._bindControls();
     this._populateScenarios();
@@ -201,7 +209,8 @@ export class UIController {
     unitDetails.appendChild(title);
 
     const status = document.createElement("p");
-    status.textContent = unit.status === "online" ? "Online" : `Offline (${Math.ceil(unit.downtime)} min remaining)`;
+    status.textContent = this._describeUnitStatus(unit);
+
     status.classList.add("unit-status");
     unitDetails.appendChild(status);
 
@@ -214,6 +223,12 @@ export class UIController {
     list.appendChild(this._statRow("Incidents", `${unit.incidents}`));
 
     unitDetails.appendChild(list);
+
+    const overrideState = this._getOverrideState(unit);
+    this._renderUnitControls(unitDetails, unit, overrideState);
+    this._renderAlertDetail(unitDetails, unit);
+    this._renderProcessTopology(unitDetails, unit);
+
   }
 
   _statRow(label, value) {
@@ -227,7 +242,13 @@ export class UIController {
     return wrapper;
   }
 
-  update(logisticsState) {
+
+  update(logisticsState, flows = null) {
+    if (flows) {
+      this.latestFlows = { ...flows };
+    } else {
+      this.latestFlows = this.simulation.getFlows();
+    }
 
     const metrics = this.simulation.getMetrics();
     this._renderMetrics(metrics);
@@ -639,6 +660,221 @@ export class UIController {
     return item;
   }
 
+  _formatFlow(value) {
+    if (typeof value !== "number" || Number.isNaN(value)) {
+      return "—";
+    }
+    return `${this.flowFormatter.format(value)} kbpd`;
+  }
+
+  _lookupUnitName(unitId) {
+    if (!unitId) {
+      return "unit";
+    }
+    return this.processTopology?.[unitId]?.name || unitId;
+  }
+
+  _getOverrideState(unit) {
+    const override =
+      typeof this.simulation.getUnitOverride === "function"
+        ? this.simulation.getUnitOverride(unit.id)
+        : null;
+    const throttle =
+      typeof override?.throttle === "number"
+        ? override.throttle
+        : typeof unit.overrideThrottle === "number"
+        ? unit.overrideThrottle
+        : 1;
+    const offline = Boolean(override?.offline) || unit.status === "standby";
+    return { throttle: Math.min(Math.max(throttle, 0), 1.2), offline };
+  }
+
+  _renderUnitControls(container, unit, override) {
+    const controls = document.createElement("div");
+    controls.classList.add("unit-controls");
+
+    const notices = [];
+    if (unit.emergencyOffline) {
+      notices.push("Emergency hold keeps this unit offline until released.");
+    } else if (override.offline) {
+      notices.push("Unit is manually held in standby.");
+    }
+    if (Math.abs((override.throttle ?? 1) - 1) > 0.01) {
+      notices.push(`Throttle override set to ${Math.round((override.throttle ?? 1) * 100)}%.`);
+    }
+    if (notices.length) {
+      const notice = document.createElement("p");
+      notice.classList.add("unit-override-notice");
+      notice.textContent = notices.join(" ");
+      controls.appendChild(notice);
+    }
+
+    const throttleWrapper = document.createElement("div");
+    throttleWrapper.classList.add("unit-throttle-control");
+    const label = document.createElement("label");
+    const sliderId = `unit-throttle-${unit.id}`;
+    label.setAttribute("for", sliderId);
+    label.classList.add("unit-throttle-label");
+    const throttleValue = document.createElement("span");
+    throttleValue.classList.add("unit-throttle-value");
+    throttleValue.textContent = `${Math.round((override.throttle ?? 1) * 100)}%`;
+    label.append(document.createTextNode("Throttle "), throttleValue);
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.min = "0";
+    slider.max = "120";
+    slider.step = "5";
+    slider.id = sliderId;
+    slider.value = String(Math.round((override.throttle ?? 1) * 100));
+    slider.addEventListener("input", (event) => {
+      const value = Number(event.target.value) / 100;
+      throttleValue.textContent = `${Math.round(value * 100)}%`;
+      this.simulation.setUnitThrottle(unit.id, value, { quiet: true });
+    });
+    slider.addEventListener("change", (event) => {
+      const value = Number(event.target.value) / 100;
+      this.simulation.setUnitThrottle(unit.id, value);
+      this.selectUnit(unit.id);
+    });
+    throttleWrapper.append(label, slider);
+    controls.appendChild(throttleWrapper);
+
+    const buttonRow = document.createElement("div");
+    buttonRow.classList.add("unit-control-buttons");
+    const offlineActive = override.offline;
+    const toggleButton = document.createElement("button");
+    toggleButton.type = "button";
+    toggleButton.classList.add("unit-control-button");
+    toggleButton.textContent = offlineActive
+      ? unit.emergencyOffline
+        ? "Release Hold"
+        : "Bring Unit Online"
+      : "Take Unit Offline";
+    toggleButton.addEventListener("click", () => {
+      this.simulation.setUnitOffline(unit.id, !offlineActive);
+      this.selectUnit(unit.id);
+    });
+    buttonRow.appendChild(toggleButton);
+
+    const clearButton = document.createElement("button");
+    clearButton.type = "button";
+    clearButton.classList.add("unit-control-button", "secondary");
+    const hasOverride = offlineActive || Math.abs((override.throttle ?? 1) - 1) > 0.01;
+    clearButton.textContent = "Clear Overrides";
+    clearButton.disabled = !hasOverride;
+    clearButton.addEventListener("click", () => {
+      this.simulation.clearUnitOverride(unit.id);
+      this.selectUnit(unit.id);
+    });
+    buttonRow.appendChild(clearButton);
+
+    controls.appendChild(buttonRow);
+    container.appendChild(controls);
+  }
+
+  _renderAlertDetail(container, unit) {
+    const detail = unit.alertDetail || unit.lastIncident;
+    if (!detail) {
+      return;
+    }
+    const alertBox = document.createElement("div");
+    alertBox.classList.add("unit-incident");
+    alertBox.classList.add(detail.severity === "danger" ? "danger" : "warning");
+    const title = document.createElement("strong");
+    title.textContent = detail.severity === "danger" ? "Critical incident" : "Process upset";
+    alertBox.appendChild(title);
+    if (detail.cause) {
+      const cause = document.createElement("p");
+      cause.textContent = detail.cause;
+      alertBox.appendChild(cause);
+    }
+    if (unit.status === "offline" && unit.downtime > 0) {
+      const eta = document.createElement("span");
+      eta.classList.add("unit-incident-eta");
+      eta.textContent = `Repairs ~${Math.ceil(unit.downtime)} min`;
+      alertBox.appendChild(eta);
+    }
+    if (detail.recordedAt) {
+      const timestamp = document.createElement("span");
+      timestamp.classList.add("unit-incident-time");
+      timestamp.textContent = detail.recordedAt;
+      alertBox.appendChild(timestamp);
+    }
+    container.appendChild(alertBox);
+  }
+
+  _renderProcessTopology(container, unit) {
+    const topology = this.processTopology?.[unit.id];
+    if (!topology) {
+      return;
+    }
+    const wrapper = document.createElement("div");
+    wrapper.classList.add("unit-process");
+    if (topology.summary) {
+      const summary = document.createElement("p");
+      summary.classList.add("unit-process-summary");
+      summary.textContent = topology.summary;
+      wrapper.appendChild(summary);
+    }
+    this._renderProcessList(wrapper, "Feeds", topology.feeds || []);
+    this._renderProcessList(wrapper, "Outputs", topology.outputs || []);
+    container.appendChild(wrapper);
+  }
+
+  _renderProcessList(container, heading, items) {
+    if (!items.length) {
+      return;
+    }
+    const section = document.createElement("div");
+    section.classList.add("unit-process-section");
+    const title = document.createElement("h4");
+    title.textContent = heading;
+    section.appendChild(title);
+    const list = document.createElement("ul");
+    list.classList.add("unit-process-list");
+    items.forEach((item) => {
+      const row = document.createElement("li");
+      const label = document.createElement("span");
+      label.classList.add("unit-process-label");
+      label.textContent = item.label || item.kind || this._lookupUnitName(item.unit || "");
+      row.appendChild(label);
+      if (item.unit) {
+        const link = document.createElement("span");
+        link.classList.add("unit-process-link");
+        const direction = heading === "Feeds" ? "from" : "to";
+        link.textContent = `${direction} ${this._lookupUnitName(item.unit)}`;
+        row.appendChild(link);
+      }
+      if (item.pipeline) {
+        const flow = document.createElement("span");
+        flow.classList.add("unit-process-flow");
+        flow.textContent = this._formatFlow(this.latestFlows[item.pipeline]);
+        row.appendChild(flow);
+      }
+      list.appendChild(row);
+    });
+    section.appendChild(list);
+    container.appendChild(section);
+  }
+
+  _describeUnitStatus(unit) {
+    if (unit.status === "online") {
+      return unit.alert ? `Online — ${unit.alert}` : "Online";
+    }
+    if (unit.status === "standby") {
+      if (unit.emergencyOffline) {
+        return "Standby (emergency hold)";
+      }
+      if (unit.manualOffline) {
+        return "Standby (manual)";
+      }
+      return "Standby";
+    }
+    const minutes = Math.max(1, Math.ceil(unit.downtime || 0));
+    return `Offline (${minutes} min remaining)`;
+  }
+
+
   _formatHours(hours) {
     if (!Number.isFinite(hours)) {
       return "--";
@@ -657,7 +893,6 @@ export class UIController {
     }
     return `${prefix}${h}h ${String(m).padStart(2, "0")}m`;
   }
-
 
   _updateClock() {
     if (!this.elements.clock) return;
