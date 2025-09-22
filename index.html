@@ -192,6 +192,43 @@
                 </div>
               </section>
 
+              <section id="logistics-panel" class="panel logistics" aria-live="polite">
+                <h2>Supply &amp; Logistics</h2>
+                <div class="inventory-grid">
+                  <div class="inventory-card">
+                    <h3>Gasoline Tanks</h3>
+                    <div class="inventory-bar">
+                      <div id="inventory-gasoline-fill" class="inventory-fill"></div>
+                    </div>
+                    <span id="inventory-gasoline-label">0 / 0 kb</span>
+                  </div>
+                  <div class="inventory-card">
+                    <h3>Diesel Tanks</h3>
+                    <div class="inventory-bar">
+                      <div id="inventory-diesel-fill" class="inventory-fill"></div>
+                    </div>
+                    <span id="inventory-diesel-label">0 / 0 kb</span>
+                  </div>
+                  <div class="inventory-card">
+                    <h3>Jet Fuel Tanks</h3>
+                    <div class="inventory-bar">
+                      <div id="inventory-jet-fill" class="inventory-fill"></div>
+                    </div>
+                    <span id="inventory-jet-label">0 / 0 kb</span>
+                  </div>
+                </div>
+                <div class="shipment-header">
+                  <h3>Dock Schedule</h3>
+                  <span id="shipment-reliability">100% on-time</span>
+                </div>
+                <ul id="shipment-list" class="shipment-list"></ul>
+              </section>
+
+              <section id="directives-panel" class="panel directives" aria-live="polite">
+                <h2>Shift Directives</h2>
+                <ul id="directive-list" class="directive-list"></ul>
+              </section>
+
               <section id="unit-panel" class="panel unit-detail" aria-live="polite">
                 <h2>Unit Detail</h2>
                 <div class="panel-body" id="unit-details">
@@ -222,7 +259,11 @@
             <li>Click any process unit to inspect throughput, utilization, and incident history.</li>
             <li>Shift-drag or use the right mouse button to pan the map; scroll the mouse wheel to zoom.</li>
             <li>Monitor the hovering gauges and alerts—yellow indicates strain, red marks critical incidents.</li>
-            <li>The Operations Grade panel blends profit, reliability, and emissions into a running score.</li>
+            <li>
+              Stage barrels in the Supply &amp; Logistics board to clear marine orders and keep an eye on the shift directives to
+              earn bonus performance.
+            </li>
+            <li>The Operations Grade panel blends profit, reliability, emissions, and delivery discipline into a running score.</li>
           </ul>
         </div>
       </section>

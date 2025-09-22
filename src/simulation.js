@@ -1,4 +1,12 @@
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+const randomRange = (min, max) => min + Math.random() * (max - min);
+
+const PRODUCT_LABELS = {
+  gasoline: "gasoline",
+  diesel: "diesel",
+  jet: "jet fuel",
+};
+
 
 const HOURS_PER_DAY = 24;
 
@@ -41,6 +49,13 @@ export class RefinerySimulation {
       grade: "B",
       scoreNote: "Plant stabilizing…",
       scoreDelta: 0,
+      storageGasoline: 0,
+      storageDiesel: 0,
+      storageJet: 0,
+      storageUtilization: 0,
+      shipmentReliability: 1,
+      directivesCompleted: 0,
+      directiveReliability: 1,
     };
 
     this.flows = {
@@ -52,6 +67,15 @@ export class RefinerySimulation {
     };
 
     this.performanceHistory = [];
+
+    this.storage = this._initStorage();
+    this.shipments = [];
+    this.shipmentStats = { total: 0, onTime: 0, missed: 0 };
+    this.nextShipmentIn = 2.5;
+    this.directives = [];
+    this.directiveStats = { total: 0, completed: 0, failed: 0 };
+    this._seedDirectives();
+
 
     this.logs = [];
     this.pushLog(
@@ -230,6 +254,13 @@ export class RefinerySimulation {
       grade: "B",
       scoreNote: "Plant stabilizing…",
       scoreDelta: 0,
+      storageGasoline: 0,
+      storageDiesel: 0,
+      storageJet: 0,
+      storageUtilization: 0,
+      shipmentReliability: 1,
+      directivesCompleted: 0,
+      directiveReliability: 1,
     };
     this.flows = {
       toReformer: 0,
@@ -238,6 +269,13 @@ export class RefinerySimulation {
       toAlkylation: 0,
       toExport: 0,
     };
+    this.storage = this._initStorage();
+    this.shipments = [];
+    this.shipmentStats = { total: 0, onTime: 0, missed: 0 };
+    this.nextShipmentIn = 2.5;
+    this.directives = [];
+    this.directiveStats = { total: 0, completed: 0, failed: 0 };
+    this._seedDirectives();
     this.units.forEach((unit) => {
       unit.throughput = 0;
       unit.utilization = 0;
@@ -494,7 +532,13 @@ export class RefinerySimulation {
       { hours, scenario, flare }
     );
 
-    const penalty = incidentsRisk.incidentPenalty;
+    const logisticsReport = this._updateLogistics({
+      hours,
+      production: result,
+      prices: { gasoline: gasolinePrice, diesel: dieselPrice, jet: jetPrice },
+    });
+
+    const penalty = incidentsRisk.incidentPenalty + logisticsReport.penalty;
     const profitPerDay = productRevenue - crudeExpense - operatingExpense - penalty;
     const profitPerHour = profitPerDay / HOURS_PER_DAY;
 
@@ -522,6 +566,7 @@ export class RefinerySimulation {
     this.flows.toAlkylation = alkFeed;
     this.flows.toExport = result.gasoline + result.diesel + result.jet;
 
+    this._updateDirectives(hours, { shipments: logisticsReport, metrics: this.metrics });
     this._updateScorecard({
       profitPerHour,
       crudeThroughput,
@@ -531,6 +576,8 @@ export class RefinerySimulation {
       gasoline: this.metrics.gasoline,
       diesel: this.metrics.diesel,
       jet: this.metrics.jet,
+      shipmentScore: this.metrics.shipmentReliability,
+      directiveScore: this.metrics.directiveReliability,
     });
 
     this._updateAlerts(deltaMinutes);
@@ -661,13 +708,29 @@ export class RefinerySimulation {
     const reliabilityScore = clamp(context.reliability, 0, 1);
     const carbonScore = clamp(1 - context.carbon / 140, 0, 1);
     const incidentScore = clamp(1 - context.incidents * 0.18, 0, 1);
+    const shipmentScore = clamp(
+      typeof context.shipmentScore === "number"
+        ? context.shipmentScore
+        : this.metrics.shipmentReliability ?? 1,
+      0,
+      1
+    );
+    const directiveScore = clamp(
+      typeof context.directiveScore === "number"
+        ? context.directiveScore
+        : this.metrics.directiveReliability ?? 1,
+      0,
+      1
+    );
 
     const composite = clamp(
-      throughputScore * 0.22 +
-        profitScore * 0.2 +
-        reliabilityScore * 0.26 +
-        carbonScore * 0.18 +
-        incidentScore * 0.14,
+      throughputScore * 0.2 +
+        profitScore * 0.18 +
+        reliabilityScore * 0.2 +
+        carbonScore * 0.14 +
+        incidentScore * 0.1 +
+        shipmentScore * 0.1 +
+        directiveScore * 0.08,
       0,
       1
     );
@@ -686,6 +749,8 @@ export class RefinerySimulation {
       reliabilityScore,
       carbonScore,
       incidentScore,
+      shipmentScore,
+      directiveScore,
     });
     this.metrics.scoreDelta = delta;
 
@@ -744,6 +809,22 @@ export class RefinerySimulation {
       highlights.push("Product output is beating plan.");
     }
 
+    if (typeof scores.shipmentScore === "number") {
+      if (scores.shipmentScore < 0.6) {
+        issues.push("Marine dispatch is missing windows; balance inventories to meet dock orders.");
+      } else if (scores.shipmentScore > 0.85) {
+        highlights.push("Dock schedule is flowing smoothly with on-time sailings.");
+      }
+    }
+
+    if (typeof scores.directiveScore === "number") {
+      if (scores.directiveScore < 0.55) {
+        issues.push("Supervisors flag missed directives—align operations with shift goals.");
+      } else if (scores.directiveScore > 0.85) {
+        highlights.push("Shift directives are being crushed; crews are in sync.");
+      }
+    }
+
     if (issues.length) {
       return issues[0];
     }
@@ -751,6 +832,326 @@ export class RefinerySimulation {
       return highlights[0];
     }
     return "Plant stabilizing…";
+  }
+  _initStorage() {
+    const capacity = { gasoline: 220, diesel: 180, jet: 140 };
+    return {
+      capacity,
+      levels: {
+        gasoline: capacity.gasoline * 0.52,
+        diesel: capacity.diesel * 0.48,
+        jet: capacity.jet * 0.45,
+      },
+    };
+  }
+
+  _countPendingShipments() {
+    return this.shipments.filter((shipment) => shipment.status === "pending").length;
+  }
+
+  _scheduleShipment() {
+    const productPool = ["gasoline", "gasoline", "diesel", "diesel", "jet"];
+    const product = productPool[Math.floor(Math.random() * productPool.length)];
+    const base = product === "jet" ? 46 : product === "diesel" ? 54 : 60;
+    const volume = Math.round(randomRange(base * 0.75, base * 1.35));
+    const window = randomRange(4, 7.5);
+    const shipment = {
+      id: `ship-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+      product,
+      volume,
+      window,
+      dueIn: window,
+      status: "pending",
+      createdAt: this.timeMinutes,
+      cooldown: 0,
+    };
+    this.shipments.push(shipment);
+    this.pushLog(
+      "info",
+      `${volume.toFixed(0)} kb of ${PRODUCT_LABELS[product]} requested at the marine dock within ${window.toFixed(
+        1
+      )} h.`
+    );
+  }
+
+  _resolveShipment(shipment, prices, report) {
+    shipment.dueIn = 0;
+    const product = shipment.product;
+    const available = this.storage.levels[product];
+    const price = prices[product] || 1.6;
+
+    if (available >= shipment.volume) {
+      this.storage.levels[product] = available - shipment.volume;
+      shipment.status = "completed";
+      shipment.completedAt = this.timeMinutes;
+      shipment.cooldown = 6;
+      this.shipmentStats.total += 1;
+      this.shipmentStats.onTime += 1;
+      report.delivered[product] += shipment.volume;
+      this.pushLog(
+        "info",
+        `Loaded ${shipment.volume.toFixed(0)} kb of ${PRODUCT_LABELS[product]} for departure.`
+      );
+    } else {
+      const shortage = Math.max(0, shipment.volume - available);
+      this.storage.levels[product] = 0;
+      shipment.status = "missed";
+      shipment.completedAt = this.timeMinutes;
+      shipment.shortage = shortage;
+      shipment.cooldown = 6;
+      this.shipmentStats.total += 1;
+      this.shipmentStats.missed = (this.shipmentStats.missed || 0) + 1;
+      report.failed += 1;
+      const severity = shipment.volume ? shortage / shipment.volume : 1;
+      const penalty = shortage * price * 0.6;
+      report.penalty += penalty;
+      const level = severity > 0.35 ? "danger" : "warning";
+      this.pushLog(
+        level,
+        `Dock missed ${PRODUCT_LABELS[product]} charter by ${shortage.toFixed(0)} kb. Penalty assessed.`,
+        { product }
+      );
+    }
+  }
+
+  _updateLogistics(context) {
+    const { production, hours, prices } = context;
+    const produced = {
+      gasoline: Math.max(0, production.gasoline * hours),
+      diesel: Math.max(0, production.diesel * hours),
+      jet: Math.max(0, production.jet * hours),
+    };
+
+    Object.entries(produced).forEach(([product, volume]) => {
+      const capacity = this.storage.capacity[product];
+      this.storage.levels[product] = clamp(this.storage.levels[product] + volume, 0, capacity);
+    });
+
+    this.nextShipmentIn -= hours;
+    if (this._countPendingShipments() < 3 && this.nextShipmentIn <= 0) {
+      this._scheduleShipment();
+      this.nextShipmentIn = randomRange(2.5, 5.5);
+    }
+
+    const report = {
+      delivered: { gasoline: 0, diesel: 0, jet: 0 },
+      failed: 0,
+      penalty: 0,
+    };
+
+    this.shipments.forEach((shipment) => {
+      if (shipment.status === "pending") {
+        shipment.dueIn -= hours;
+        if (shipment.dueIn <= 0) {
+          this._resolveShipment(shipment, prices, report);
+        }
+      } else {
+        shipment.cooldown = Math.max(0, shipment.cooldown - hours);
+      }
+    });
+
+    this.shipments = this.shipments.filter(
+      (shipment) => shipment.status === "pending" || shipment.cooldown > 0
+    );
+
+    const capacityTotal =
+      this.storage.capacity.gasoline +
+      this.storage.capacity.diesel +
+      this.storage.capacity.jet;
+    const levelTotal =
+      this.storage.levels.gasoline +
+      this.storage.levels.diesel +
+      this.storage.levels.jet;
+
+    this.metrics.storageGasoline = this._round(this.storage.levels.gasoline);
+    this.metrics.storageDiesel = this._round(this.storage.levels.diesel);
+    this.metrics.storageJet = this._round(this.storage.levels.jet);
+    this.metrics.storageUtilization = capacityTotal
+      ? clamp(levelTotal / capacityTotal, 0, 1)
+      : 0;
+
+    const shipmentTotal = Math.max(0, this.shipmentStats.total);
+    const onTime = this.shipmentStats.onTime;
+    this.metrics.shipmentReliability = shipmentTotal ? clamp(onTime / shipmentTotal, 0, 1) : 1;
+
+    return report;
+  }
+
+  _seedDirectives() {
+    while (this.directives.length < 3) {
+      this.directives.push(this._createDirective());
+    }
+  }
+
+  _createDirective() {
+    const id = `dir-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`;
+    const roll = Math.random();
+
+    if (roll < 0.4) {
+      const duration = randomRange(10, 16);
+      const threshold = randomRange(0.78, 0.88);
+      return {
+        id,
+        type: "reliability",
+        title: `Hold reliability ≥ ${Math.round(threshold * 100)}%`,
+        description: "Keep units stable and avoid unplanned outages for the next shift.",
+        threshold,
+        duration,
+        timeRemaining: duration,
+        status: "active",
+        progress: 0,
+        progressRatio: 0,
+        cooldown: 0,
+      };
+    }
+
+    if (roll < 0.7) {
+      const products = ["gasoline", "diesel", "jet"];
+      const product = products[Math.floor(Math.random() * products.length)];
+      const base = product === "jet" ? 60 : product === "diesel" ? 70 : 85;
+      const target = Math.round(randomRange(base * 0.9, base * 1.3));
+      const duration = randomRange(14, 20);
+      return {
+        id,
+        type: "delivery",
+        title: `Stage ${target} kb ${PRODUCT_LABELS[product]}`,
+        description: "Build inventory to satisfy a contracted marine charter.",
+        product,
+        target,
+        duration,
+        timeRemaining: duration,
+        status: "active",
+        progress: 0,
+        progressRatio: 0,
+        cooldown: 0,
+      };
+    }
+
+    const duration = randomRange(12, 18);
+    const threshold = Math.round(randomRange(58, 72));
+    return {
+      id,
+      type: "carbon",
+      title: `Hold carbon ≤ ${threshold} tCO₂-eq`,
+      description: "Throttle flaring and emissions until regulators stand-down.",
+      threshold,
+      allowance: 1.2,
+      breach: 0,
+      duration,
+      timeRemaining: duration,
+      status: "active",
+      progress: 0,
+      progressRatio: 0,
+      cooldown: 0,
+    };
+  }
+
+  _updateDirectives(hours, context) {
+    const shipments = context?.shipments ?? { delivered: {} };
+    const metrics = context?.metrics ?? this.metrics;
+
+    const completed = [];
+    const failed = [];
+
+    this.directives.forEach((directive) => {
+      if (directive.status === "completed" || directive.status === "failed") {
+        directive.cooldown = Math.max(0, (directive.cooldown || 0) - hours);
+        return;
+      }
+
+      directive.timeRemaining = Math.max(0, directive.timeRemaining - hours);
+
+      if (directive.type === "delivery") {
+        const product = directive.product;
+        const delivered = shipments.delivered?.[product] || 0;
+        if (delivered > 0) {
+          directive.progress = (directive.progress || 0) + delivered;
+        }
+        directive.progressRatio = directive.target
+          ? clamp(directive.progress / directive.target, 0, 1)
+          : 0;
+        if (directive.progress >= directive.target) {
+          directive.status = "completed";
+          directive.cooldown = 6;
+          completed.push(directive);
+          this.pushLog("info", `Directive complete: ${directive.title}`);
+        } else if (directive.timeRemaining <= 0) {
+          directive.status = "failed";
+          directive.cooldown = 6;
+          failed.push(directive);
+          this.pushLog("warning", `Directive lapsed: ${directive.title}`);
+        }
+        return;
+      }
+
+      if (directive.type === "reliability") {
+        const ratio = directive.duration
+          ? clamp(1 - directive.timeRemaining / directive.duration, 0, 1)
+          : 0;
+        directive.progressRatio = ratio;
+        if (metrics.reliability < directive.threshold) {
+          directive.status = "failed";
+          directive.cooldown = 6;
+          failed.push(directive);
+          this.pushLog("warning", `Directive failed: ${directive.title}`);
+        } else if (directive.timeRemaining <= 0) {
+          directive.status = "completed";
+          directive.cooldown = 6;
+          completed.push(directive);
+          this.pushLog("info", `Directive complete: ${directive.title}`);
+        }
+        return;
+      }
+
+      if (directive.type === "carbon") {
+        const ratio = directive.duration
+          ? clamp(1 - directive.timeRemaining / directive.duration, 0, 1)
+          : 0;
+        directive.progressRatio = ratio;
+        directive.breach = directive.breach || 0;
+        if (metrics.carbon > directive.threshold) {
+          directive.breach += hours;
+        } else if (directive.breach > 0) {
+          directive.breach = Math.max(0, directive.breach - hours * 0.5);
+        }
+        if (directive.breach >= (directive.allowance || 1)) {
+          directive.status = "failed";
+          directive.cooldown = 6;
+          failed.push(directive);
+          this.pushLog("warning", `Directive failed: ${directive.title}`);
+        } else if (directive.timeRemaining <= 0) {
+          directive.status = "completed";
+          directive.cooldown = 6;
+          completed.push(directive);
+          this.pushLog("info", `Directive complete: ${directive.title}`);
+        }
+      }
+    });
+
+    if (completed.length || failed.length) {
+      completed.forEach(() => {
+        this.directiveStats.total += 1;
+        this.directiveStats.completed += 1;
+        this.metrics.directivesCompleted += 1;
+      });
+      failed.forEach(() => {
+        this.directiveStats.total += 1;
+        this.directiveStats.failed = (this.directiveStats.failed || 0) + 1;
+      });
+    }
+
+    this.directives = this.directives.filter(
+      (directive) => directive.status === "active" || (directive.cooldown || 0) > 0
+    );
+
+    let activeCount = this.directives.filter((directive) => directive.status === "active").length;
+    while (activeCount < 3) {
+      this.directives.push(this._createDirective());
+      activeCount += 1;
+    }
+
+    const total = this.directiveStats.total;
+    this.metrics.directiveReliability = total ? clamp(this.directiveStats.completed / total, 0, 1) : 1;
   }
 
   _updateAlerts(deltaMinutes) {
@@ -778,4 +1179,19 @@ export class RefinerySimulation {
       }
     });
   }
+  getLogisticsState() {
+    return {
+      storage: {
+        capacity: { ...this.storage.capacity },
+        levels: { ...this.storage.levels },
+      },
+      shipments: this.shipments.map((shipment) => ({ ...shipment })),
+      stats: { ...this.shipmentStats },
+    };
+  }
+
+  getDirectives() {
+    return this.directives.map((directive) => ({ ...directive }));
+  }
+
 }

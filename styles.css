@@ -167,7 +167,6 @@ body {
   background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(113, 158, 220, 0.6), rgba(255, 255, 255, 0));
 }
 
-
 .windows {
   display: flex;
   flex-wrap: wrap;
@@ -233,7 +232,6 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
-
 }
 
 .map-toolbar {
@@ -291,7 +289,6 @@ body {
   position: relative;
   flex: 1 1 420px;
   min-height: 340px;
-
   border: 3px solid #0f1828;
   box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.35);
   background: #061020;
@@ -949,6 +946,262 @@ body {
   background: rgba(244, 196, 196, 0.78);
   border-left-color: var(--log-danger);
 }
+
+.panel.logistics {
+  gap: 14px;
+}
+
+.inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.inventory-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: linear-gradient(180deg, rgba(244, 248, 255, 0.96), rgba(218, 230, 248, 0.92));
+  border: 1px solid rgba(98, 132, 184, 0.3);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+  border-radius: 4px;
+  font-family: "Inconsolata", monospace;
+}
+
+.inventory-card h3 {
+  margin: 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #1c355a;
+}
+
+.inventory-card span {
+  font-size: 0.75rem;
+  color: #1b2433;
+}
+
+.inventory-bar {
+  height: 12px;
+  border: 1px solid rgba(28, 46, 78, 0.35);
+  border-radius: 6px;
+  background: rgba(18, 30, 46, 0.1);
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+}
+
+.inventory-fill {
+  height: 100%;
+  width: 28%;
+  background: linear-gradient(90deg, #52b3ff, #3161ca);
+  transition: width 0.35s ease, background 0.35s ease;
+}
+
+.inventory-fill.over {
+  background: linear-gradient(90deg, #ffad4a, #ff6f3c);
+}
+
+.shipment-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(36, 58, 94, 0.25);
+}
+
+.shipment-header h3 {
+  margin: 0;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #1b2d47;
+}
+
+#shipment-reliability {
+  font-size: 0.7rem;
+  color: #3b4f75;
+  font-family: "Inconsolata", monospace;
+}
+
+.shipment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shipment {
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, rgba(20, 32, 52, 0.95), rgba(10, 16, 28, 0.92));
+  border: 1px solid rgba(96, 136, 192, 0.4);
+  color: rgba(222, 236, 255, 0.95);
+  font-family: "Inconsolata", monospace;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.shipment.completed {
+  border-color: rgba(112, 186, 148, 0.55);
+  background: linear-gradient(180deg, rgba(24, 42, 32, 0.95), rgba(12, 24, 18, 0.92));
+}
+
+.shipment.missed {
+  border-color: rgba(214, 110, 110, 0.6);
+  background: linear-gradient(180deg, rgba(46, 20, 20, 0.94), rgba(26, 12, 12, 0.9));
+}
+
+.shipment.empty {
+  background: rgba(236, 240, 248, 0.85);
+  border: 1px dashed rgba(98, 122, 158, 0.45);
+  color: #24324a;
+}
+
+.shipment-header,
+.shipment-header span {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.shipment-product {
+  color: rgba(202, 230, 255, 0.95);
+}
+
+.shipment-status {
+  color: rgba(168, 212, 255, 0.9);
+}
+
+.shipment.completed .shipment-status {
+  color: rgba(154, 232, 182, 0.95);
+}
+
+.shipment.missed .shipment-status {
+  color: rgba(255, 177, 177, 0.9);
+}
+
+.shipment-progress {
+  margin-top: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.shipment-progress .fill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, rgba(88, 189, 255, 0.9), rgba(76, 136, 244, 0.95));
+  transition: width 0.3s ease;
+}
+
+.shipment-note {
+  margin-top: 6px;
+  font-size: 0.68rem;
+  color: rgba(255, 208, 168, 0.9);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.panel.directives {
+  gap: 12px;
+}
+
+.directive-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.directive {
+  background: linear-gradient(180deg, rgba(246, 247, 250, 0.95), rgba(226, 232, 244, 0.92));
+  border: 1px solid rgba(126, 146, 186, 0.35);
+  border-radius: 4px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: "Inconsolata", monospace;
+  color: #24314a;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+}
+
+.directive.completed {
+  border-color: rgba(112, 186, 148, 0.45);
+  background: linear-gradient(180deg, rgba(234, 245, 236, 0.95), rgba(208, 234, 215, 0.92));
+}
+
+.directive.failed {
+  border-color: rgba(214, 110, 110, 0.5);
+  background: linear-gradient(180deg, rgba(248, 231, 231, 0.94), rgba(236, 200, 200, 0.9));
+}
+
+.directive-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.directive-title {
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+}
+
+.directive-status {
+  font-size: 0.7rem;
+  color: #3c4a6a;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.directive.completed .directive-status {
+  color: #3f7a58;
+}
+
+.directive.failed .directive-status {
+  color: #8f2f2f;
+}
+
+.directive p {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.directive-meta {
+  font-size: 0.7rem;
+  color: #364563;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.directive-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(28, 42, 68, 0.18);
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+
+.directive-progress .fill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, rgba(88, 205, 152, 0.9), rgba(48, 148, 102, 0.95));
+  transition: width 0.32s ease;
+}
+
+.directive.failed .directive-progress .fill {
+  background: linear-gradient(90deg, rgba(244, 132, 132, 0.9), rgba(211, 72, 72, 0.95));
+}
+
 
 .about-window {
   max-width: 720px;

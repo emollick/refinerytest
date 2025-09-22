@@ -1,4 +1,5 @@
-import * as THREE from "https://unpkg.com/three@0.152.2/build/three.module.js";
+
+import * as THREE from "../vendor/three.module.js";
 import { RefinerySimulation } from "./simulation.js";
 import { UIController } from "./ui.js";
 
@@ -117,13 +118,17 @@ const pipelineVisuals = new Map();
 const waterLayers = [];
 let dockVisual = null;
 let flareVisual = null;
+const tankVisuals = {
+  gasoline: [],
+  diesel: [],
+  jet: [],
+};
 const alertTextures = {};
 let gridOverlay = null;
 let gridVisible = true;
 let flowOverlayVisible = true;
 let selectedUnitId = null;
 let activeMenu = null;
-
 const gaugeColors = {
   good: new THREE.Color(0x6ae28a),
   warn: new THREE.Color(0xf2d06b),
@@ -318,15 +323,14 @@ const toolbarPresetButtons = document.querySelectorAll("[data-preset]");
 const toolbarUnitButtons = document.querySelectorAll("[data-unit-target]");
 const toolbarScenarioButtons = document.querySelectorAll("[data-scenario]");
 
-// Preset buttons
+
 toolbarPresetButtons.forEach((button) => {
   button.addEventListener("click", () => {
     const preset = button.dataset.preset;
-    if (preset) applyPreset(preset);
+    applyPreset(preset);
   });
 });
 
-// Unit select buttons
 toolbarUnitButtons.forEach((button) => {
   button.addEventListener("click", () => {
     const target = button.dataset.unitTarget || null;
@@ -335,7 +339,6 @@ toolbarUnitButtons.forEach((button) => {
   });
 });
 
-// Scenario buttons
 toolbarScenarioButtons.forEach((button) => {
   button.addEventListener("click", () => {
     const scenario = button.dataset.scenario;
@@ -346,7 +349,6 @@ toolbarScenarioButtons.forEach((button) => {
   });
 });
 
-// Sliders break the preset "active" state
 const sliderInputs = document.querySelectorAll('#hud input[type="range"]');
 sliderInputs.forEach((input) => {
   input.addEventListener("input", () => {
@@ -358,7 +360,6 @@ sliderInputs.forEach((input) => {
   });
 });
 
-// Keep toolbar in sync if the scenario dropdown exists in the UI
 if (ui.elements?.scenario) {
   ui.elements.scenario.addEventListener("change", (event) => {
     updateScenarioButtons(event.target.value);
@@ -406,11 +407,14 @@ function animate() {
   elapsed += delta;
 
   simulation.update(delta);
-  ui.update();
+  const logisticsState = simulation.getLogisticsState();
+  ui.update(logisticsState);
+
 
   updateUnits(elapsed);
   updatePipelines(simulation.getFlows(), elapsed);
   updateEnvironment(elapsed);
+  updateLogisticsVisuals(logisticsState, elapsed);
   refreshUnitPulse(elapsed);
 
   renderer.render(scene, camera);
@@ -1319,6 +1323,7 @@ function createPipelineVisual(config) {
 }
 
 function createTankFarm() {
+  const productOrder = ["gasoline", "gasoline", "diesel", "jet"];
   const tankPositions = [
     { x: 9.5, y: 9.3, radius: 2.2 },
     { x: 10.5, y: 10.5, radius: 2.6 },
@@ -1328,6 +1333,7 @@ function createTankFarm() {
 
   tankPositions.forEach((entry, index) => {
     const position = tileToWorld(entry.x, entry.y);
+    const product = productOrder[index % productOrder.length];
     const shellMaterial = new THREE.MeshStandardMaterial({
       color: 0xdde3ea,
       roughness: 0.5,
@@ -1360,6 +1366,29 @@ function createTankFarm() {
     ladder.position.set(position.x, 3.05, position.z + entry.radius * 0.9);
     ladder.rotation.y = index % 2 === 0 ? 0 : Math.PI / 6;
     scene.add(ladder);
+
+    const liquidColor =
+      product === "gasoline"
+        ? 0xffa45e
+        : product === "diesel"
+        ? 0xffd374
+        : 0x9bd1ff;
+    const liquidMaterial = new THREE.MeshPhongMaterial({
+      color: liquidColor,
+      transparent: true,
+      opacity: 0.42,
+      shininess: 80,
+      emissive: new THREE.Color(0x0),
+    });
+    const liquid = new THREE.Mesh(
+      new THREE.CylinderGeometry(entry.radius * 0.85, entry.radius * 0.9, 2.2, 18),
+      liquidMaterial
+    );
+    liquid.position.set(position.x, 0.4, position.z);
+    liquid.scale.y = 0.35;
+    scene.add(liquid);
+    tankVisuals[product].push({ mesh: liquid, baseY: 0.4, height: 1 });
+
   });
 }
 
@@ -1380,7 +1409,8 @@ function createDock() {
     new THREE.MeshStandardMaterial({ color: 0x1c2733, roughness: 0.5, metalness: 0.15, flatShading: true })
   );
   hull.position.y = 1.1;
-    ship.add(hull);
+  ship.add(hull);
+
   const bridge = new THREE.Mesh(
     new THREE.BoxGeometry(3.8, 1.5, 2.2),
     new THREE.MeshStandardMaterial({ color: 0xf1f2f3, roughness: 0.4, metalness: 0.05, flatShading: true })
@@ -1396,8 +1426,15 @@ function createDock() {
   ship.position.set(base.x + 4.8, 0, base.z - 2.6);
   group.add(ship);
 
+  const beacon = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.5, 0.5, 0.2, 12),
+    new THREE.MeshBasicMaterial({ color: 0x7ed0ff, transparent: true, opacity: 0.12, depthWrite: false })
+  );
+  beacon.position.set(base.x + 6.4, 1.6, base.z + 2.2);
+  group.add(beacon);
+
   scene.add(group);
-  return { group, ship };
+  return { group, ship, beacon };
 }
 
 function createFlare(position) {
@@ -1849,4 +1886,41 @@ function updateEnvironment(time) {
     flareVisual.light.intensity = 3 + flareLevel * 8;
     flareVisual.light.distance = 22 + flareLevel * 26;
   }
+}
+
+function updateLogisticsVisuals(logistics, time) {
+  if (!logistics) {
+    return;
+  }
+  updateTankLevels(logistics.storage);
+  updateDockActivity(logistics.shipments, time);
+}
+
+function updateTankLevels(storage = {}) {
+  const levels = storage.levels || {};
+  const capacity = storage.capacity || {};
+  Object.entries(tankVisuals).forEach(([product, visuals]) => {
+    const cap = capacity[product] || 0;
+    const level = levels[product] || 0;
+    const ratio = cap ? THREE.MathUtils.clamp(level / cap, 0, 1) : 0;
+    visuals.forEach((visual) => {
+      const scale = THREE.MathUtils.lerp(0.08, 1, ratio);
+      visual.mesh.scale.y = scale;
+      visual.mesh.position.y = visual.baseY + scale * visual.height;
+      visual.mesh.material.opacity = 0.35 + ratio * 0.4;
+    });
+  });
+}
+
+function updateDockActivity(shipments = [], time) {
+  if (!dockVisual || !dockVisual.beacon) {
+    return;
+  }
+  const pending = shipments.filter((shipment) => shipment.status === "pending");
+  const urgent = pending.some((shipment) => typeof shipment.dueIn === "number" && shipment.dueIn <= 1.2);
+  const base = pending.length ? Math.min(0.85, 0.18 + pending.length * 0.22) : 0.08;
+  const pulse = Math.abs(Math.sin(time * (urgent ? 6 : 3))) * 0.35;
+  dockVisual.beacon.material.opacity = Math.min(0.9, base + pulse);
+}
+
 

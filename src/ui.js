@@ -1,3 +1,11 @@
+
+const PRODUCT_LABELS = {
+  gasoline: "Gasoline",
+  diesel: "Diesel",
+  jet: "Jet Fuel",
+};
+
+
 export class UIController {
   constructor(simulation) {
     this.simulation = simulation;
@@ -36,6 +44,16 @@ export class UIController {
       unitDetails: document.getElementById("unit-details"),
       clock: document.getElementById("sim-clock"),
       modeBadge: document.getElementById("mode-badge"),
+      inventoryGasolineBar: document.getElementById("inventory-gasoline-fill"),
+      inventoryGasolineLabel: document.getElementById("inventory-gasoline-label"),
+      inventoryDieselBar: document.getElementById("inventory-diesel-fill"),
+      inventoryDieselLabel: document.getElementById("inventory-diesel-label"),
+      inventoryJetBar: document.getElementById("inventory-jet-fill"),
+      inventoryJetLabel: document.getElementById("inventory-jet-label"),
+      shipmentList: document.getElementById("shipment-list"),
+      shipmentReliability: document.getElementById("shipment-reliability"),
+      directiveList: document.getElementById("directive-list"),
+
     };
 
     this.profitFormatter = new Intl.NumberFormat("en-US", {
@@ -209,7 +227,8 @@ export class UIController {
     return wrapper;
   }
 
-  update() {
+  update(logisticsState) {
+
     const metrics = this.simulation.getMetrics();
     this._renderMetrics(metrics);
     this._renderLogs();
@@ -220,6 +239,10 @@ export class UIController {
         .find((entry) => entry.id === this.selectedUnitId);
       this._renderUnitDetails(unit || null);
     }
+    const logistics = logisticsState || this.simulation.getLogisticsState();
+    this._renderLogistics(logistics);
+    this._renderDirectives(this.simulation.getDirectives());
+
   }
 
   refreshControls() {
@@ -401,6 +424,240 @@ export class UIController {
     ctx.lineWidth = 2;
     ctx.stroke();
   }
+
+  _renderLogistics(logistics) {
+    if (!logistics) {
+      return;
+    }
+    const { storage, shipments, stats } = logistics;
+    if (storage) {
+      this._updateInventoryBar("gasoline", storage);
+      this._updateInventoryBar("diesel", storage);
+      this._updateInventoryBar("jet", storage);
+    }
+    this._renderShipmentList(Array.isArray(shipments) ? shipments : [], stats || {});
+  }
+
+  _updateInventoryBar(product, storage) {
+    const name = product.charAt(0).toUpperCase() + product.slice(1);
+    const bar = this.elements[`inventory${name}Bar`];
+    const label = this.elements[`inventory${name}Label`];
+    if (!bar && !label) {
+      return;
+    }
+    const level = storage?.levels?.[product] ?? 0;
+    const capacity = storage?.capacity?.[product] ?? 0;
+    const ratio = capacity ? Math.min(Math.max(level / capacity, 0), 1.05) : 0;
+    if (bar) {
+      bar.style.width = `${Math.round(Math.min(ratio, 1) * 100)}%`;
+      bar.classList.toggle("over", ratio > 0.98);
+    }
+    if (label) {
+      label.textContent = capacity
+        ? `${level.toFixed(0)} / ${capacity.toFixed(0)} kb`
+        : `${level.toFixed(0)} kb`;
+    }
+  }
+
+  _renderShipmentList(shipments, stats) {
+    const list = this.elements.shipmentList;
+    if (!list) {
+      return;
+    }
+    list.innerHTML = "";
+
+    const entries = [...shipments];
+    const statusOrder = { pending: 0, completed: 1, missed: 2 };
+    entries
+      .sort((a, b) => {
+        const aStatus = statusOrder[a.status] ?? 3;
+        const bStatus = statusOrder[b.status] ?? 3;
+        if (aStatus !== bStatus) {
+          return aStatus - bStatus;
+        }
+        return (a.dueIn ?? 0) - (b.dueIn ?? 0);
+      })
+      .slice(0, 5)
+      .forEach((shipment) => {
+        list.appendChild(this._renderShipmentItem(shipment));
+      });
+
+    if (!entries.length) {
+      const item = document.createElement("li");
+      item.classList.add("shipment", "empty");
+      item.textContent = "No marine movements scheduled.";
+      list.appendChild(item);
+    }
+
+    if (this.elements.shipmentReliability) {
+      const total = stats?.total ?? 0;
+      const onTime = stats?.onTime ?? 0;
+      const reliability = total ? Math.round((onTime / total) * 100) : 100;
+      this.elements.shipmentReliability.textContent = `${reliability}% on-time (${total} orders)`;
+    }
+  }
+
+  _renderShipmentItem(shipment) {
+    const item = document.createElement("li");
+    const status = shipment.status || "pending";
+    item.classList.add("shipment", status);
+
+    const header = document.createElement("div");
+    header.classList.add("shipment-header");
+    const product = document.createElement("span");
+    product.classList.add("shipment-product");
+    const productLabel = PRODUCT_LABELS[shipment.product] || "Product";
+    const volume = typeof shipment.volume === "number" ? Math.round(shipment.volume) : 0;
+    product.textContent = `${productLabel} — ${volume} kb`;
+    header.appendChild(product);
+
+    const eta = document.createElement("span");
+    eta.classList.add("shipment-status");
+    if (status === "pending") {
+      if (shipment.dueIn > 0) {
+        eta.textContent = `Due in ${this._formatHours(shipment.dueIn)}`;
+      } else if (shipment.dueIn < 0) {
+        eta.textContent = `Overdue ${this._formatHours(Math.abs(shipment.dueIn))}`;
+      } else {
+        eta.textContent = "Loading";
+      }
+    } else if (status === "completed") {
+      eta.textContent = "Cleared";
+    } else {
+      const shortage = shipment.shortage ? `${shipment.shortage.toFixed(0)} kb short` : "Missed";
+      eta.textContent = shortage;
+    }
+    header.appendChild(eta);
+    item.appendChild(header);
+
+    if (status === "pending") {
+      const progress = document.createElement("div");
+      progress.classList.add("shipment-progress");
+      const fill = document.createElement("div");
+      fill.classList.add("fill");
+      const ratio = typeof shipment.window === "number" && shipment.window > 0
+        ? Math.min(Math.max(1 - shipment.dueIn / shipment.window, 0), 1)
+        : 0;
+      fill.style.width = `${Math.round(ratio * 100)}%`;
+      progress.appendChild(fill);
+      item.appendChild(progress);
+    } else if (status === "missed") {
+      const note = document.createElement("div");
+      note.classList.add("shipment-note");
+      note.textContent = "Penalty assessed";
+      item.appendChild(note);
+    }
+
+    return item;
+  }
+
+  _renderDirectives(directives) {
+    const list = this.elements.directiveList;
+    if (!list) {
+      return;
+    }
+    list.innerHTML = "";
+    const entries = Array.isArray(directives) ? [...directives] : [];
+    const statusOrder = { active: 0, completed: 1, failed: 2 };
+
+    entries
+      .sort((a, b) => {
+        const aStatus = statusOrder[a.status] ?? 3;
+        const bStatus = statusOrder[b.status] ?? 3;
+        if (aStatus !== bStatus) {
+          return aStatus - bStatus;
+        }
+        return (a.timeRemaining ?? 0) - (b.timeRemaining ?? 0);
+      })
+      .forEach((directive) => {
+        list.appendChild(this._renderDirectiveItem(directive));
+      });
+
+    if (!entries.length) {
+      const empty = document.createElement("li");
+      empty.classList.add("directive", "empty");
+      empty.textContent = "No directives issued.";
+      list.appendChild(empty);
+    }
+  }
+
+  _renderDirectiveItem(directive) {
+    const item = document.createElement("li");
+    const status = directive.status || "active";
+    item.classList.add("directive", status);
+
+    const header = document.createElement("div");
+    header.classList.add("directive-header");
+    const title = document.createElement("span");
+    title.classList.add("directive-title");
+    title.textContent = directive.title;
+    header.appendChild(title);
+
+    const statusLabel = document.createElement("span");
+    statusLabel.classList.add("directive-status");
+    if (status === "active") {
+      statusLabel.textContent = directive.timeRemaining > 0
+        ? `${this._formatHours(directive.timeRemaining)} left`
+        : "Due now";
+    } else if (status === "completed") {
+      statusLabel.textContent = "Completed";
+    } else {
+      statusLabel.textContent = "Failed";
+    }
+    header.appendChild(statusLabel);
+    item.appendChild(header);
+
+    if (directive.description) {
+      const description = document.createElement("p");
+      description.textContent = directive.description;
+      item.appendChild(description);
+    }
+
+    const meta = document.createElement("div");
+    meta.classList.add("directive-meta");
+    if (directive.type === "delivery") {
+      const progress = directive.progress || 0;
+      meta.textContent = `${Math.min(progress, directive.target).toFixed(0)} / ${directive.target.toFixed(
+        0
+      )} kb staged`;
+    } else if (directive.type === "reliability") {
+      meta.textContent = `Maintain ≥ ${Math.round((directive.threshold || 0) * 100)}%`;
+    } else if (directive.type === "carbon") {
+      meta.textContent = `Cap at ${directive.threshold} tCO₂-eq`;
+    }
+    item.appendChild(meta);
+
+    const progressBar = document.createElement("div");
+    progressBar.classList.add("directive-progress");
+    const fill = document.createElement("div");
+    fill.classList.add("fill");
+    const ratio = Math.min(Math.max(directive.progressRatio ?? 0, 0), 1);
+    fill.style.width = `${Math.round(ratio * 100)}%`;
+    progressBar.appendChild(fill);
+    item.appendChild(progressBar);
+
+    return item;
+  }
+
+  _formatHours(hours) {
+    if (!Number.isFinite(hours)) {
+      return "--";
+    }
+    const sign = hours < 0 ? -1 : 1;
+    const absolute = Math.abs(hours);
+    const totalMinutes = Math.round(absolute * 60);
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    const prefix = sign < 0 ? "-" : "";
+    if (h === 0) {
+      return `${prefix}${m}m`;
+    }
+    if (m === 0) {
+      return `${prefix}${h}h`;
+    }
+    return `${prefix}${h}h ${String(m).padStart(2, "0")}m`;
+  }
+
 
   _updateClock() {
     if (!this.elements.clock) return;
