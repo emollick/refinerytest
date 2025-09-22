@@ -15,11 +15,52 @@
   <body>
     <div id="desktop">
       <nav id="menu-bar" class="menu-bar" role="menubar">
-        <button type="button" class="menu-item" role="menuitem">File</button>
-        <button type="button" class="menu-item" role="menuitem">Options</button>
-        <button type="button" class="menu-item" role="menuitem">Refinery</button>
-        <button type="button" class="menu-item" role="menuitem">Windows</button>
-        <button type="button" class="menu-item" role="menuitem">Pause</button>
+        <div class="menu" data-menu="session">
+          <button type="button" class="menu-item" role="menuitem" aria-haspopup="true" aria-expanded="false">
+            Session
+          </button>
+          <div class="menu-dropdown" role="menu">
+            <button type="button" class="menu-entry" data-action="session-reset">Reset to Baseline</button>
+            <button type="button" class="menu-entry" data-action="session-export">Export Snapshot…</button>
+            <label class="menu-entry file-entry" data-action="session-import" for="session-import-input"
+              >Import Snapshot…<input type="file" id="session-import-input" accept="application/json" hidden /></label
+            >
+            <div class="menu-separator" role="separator"></div>
+            <button type="button" class="menu-entry" data-action="session-speed-slower">Slow Down Time</button>
+            <button type="button" class="menu-entry" data-action="session-speed-normal">Normal Time</button>
+            <button type="button" class="menu-entry" data-action="session-speed-faster">Speed Up Time</button>
+          </div>
+        </div>
+        <div class="menu" data-menu="view">
+          <button type="button" class="menu-item" role="menuitem" aria-haspopup="true" aria-expanded="false">
+            View
+          </button>
+          <div class="menu-dropdown" role="menu">
+            <button type="button" class="menu-entry" data-action="view-center">Re-center Camera</button>
+            <button type="button" class="menu-entry" data-action="view-toggle-grid" data-state="on">
+              Hide Grid Overlay
+            </button>
+            <button type="button" class="menu-entry" data-action="view-toggle-flow" data-state="on">
+              Hide Flow Glow
+            </button>
+            <button type="button" class="menu-entry" data-action="view-cycle-light">Cycle Lighting</button>
+          </div>
+        </div>
+        <div class="menu" data-menu="scenarios">
+          <button type="button" class="menu-item" role="menuitem" aria-haspopup="true" aria-expanded="false">
+            Scenarios
+          </button>
+          <div class="menu-dropdown" role="menu" id="scenario-menu"></div>
+        </div>
+        <div class="menu" data-menu="units">
+          <button type="button" class="menu-item" role="menuitem" aria-haspopup="true" aria-expanded="false">
+            Units
+          </button>
+          <div class="menu-dropdown" role="menu" id="unit-menu"></div>
+        </div>
+        <button type="button" class="menu-item menu-action" role="menuitem" id="menu-toggle">
+          Pause
+        </button>
         <div class="menu-spacer" aria-hidden="true"></div>
         <span class="menu-title">SimRefinery Operator Console</span>
       </nav>
@@ -48,8 +89,14 @@
               <button type="button" class="toolbar-button" data-scenario="winterDiesel">WINTER</button>
               <button type="button" class="toolbar-button" data-scenario="quakeDrill">QUAKE</button>
             </div>
-            <div id="map-viewport" aria-hidden="false">
-              <div id="scene-container" aria-label="Interactive refinery view"></div>
+            <div class="map-area">
+              <div id="map-viewport" aria-hidden="false">
+                <div id="scene-container" aria-label="Interactive refinery view"></div>
+              </div>
+              <section class="map-status" aria-live="polite" aria-label="Unit quick status overview">
+                <h3>Unit Pulse</h3>
+                <ul id="unit-pulse"></ul>
+              </section>
             </div>
           </div>
         </section>
