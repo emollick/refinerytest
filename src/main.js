@@ -37,7 +37,6 @@ const processTopology = simulation.getProcessTopology?.() || {};
 
 const unitConnectionIndex = buildUnitConnectionIndex(processTopology);
 
-
 const unitConfigs = [
   {
     id: "distillation",
@@ -373,7 +372,7 @@ class TileRenderer {
       { type: "recording", x: 6.8, y: 0.6 },
     ];
   }
-  }
+
 
   _drawTiles(palette) {
     const ctx = this.context;
@@ -1084,7 +1083,6 @@ function animate(now) {
 }
 requestAnimationFrame(animate);
 
-
 function applyPreset(name, options = {}) {
   const preset = PRESETS[name];
   if (!preset) {
@@ -1283,7 +1281,7 @@ function handleMenuAction(action) {
 
       renderer.cyclePalette();
       simulation.pushLog("info", "Palette cycled — channeling SimFarm and SimCity swatches.");
-=
+
       break;
     default:
       break;

@@ -546,7 +546,6 @@ export class RefinerySimulation {
       this._updateUnitMode(reformer);
     }
 
-
     const reformate = reformFeed * 0.92;
     const reformHydrogen = reformFeed * 0.05;
     const reformLoss = reformFeed * 0.03;
@@ -598,7 +597,6 @@ export class RefinerySimulation {
       hydroFeedAvailable,
       hydroCapacity * this._pipelineMultiplier("toHydrocracker")
     );
-
 
     const heavyUsedHydro = Math.min(heavyPool, hydroFeed * 0.55);
     heavyPool -= heavyUsedHydro;
@@ -1376,7 +1374,6 @@ export class RefinerySimulation {
       });
     }
 
-
     this.shipments.forEach((shipment) => {
       if (shipment.status === "pending") {
         shipment.dueIn -= hours;
@@ -1414,7 +1411,6 @@ export class RefinerySimulation {
 
     return report;
   }
-
 
   _consumeOperationalCost() {
     const cost = this.pendingOperationalCost || 0;
@@ -1755,7 +1751,6 @@ export class RefinerySimulation {
     return true;
   }
 
-
   _seedDirectives() {
     while (this.directives.length < 3) {
       this.directives.push(this._createDirective());
@@ -1962,7 +1957,6 @@ export class RefinerySimulation {
         if (
           unit.alertTimer === 0 &&
           unit.status === "online" &&
-
           unit.integrity >= 0.6 &&
           unit.alert !== "danger"
         ) {
@@ -2043,7 +2037,6 @@ export class RefinerySimulation {
     }
   }
 
-
   getLogisticsState() {
     return {
       storage: {
@@ -2052,7 +2045,6 @@ export class RefinerySimulation {
       },
       shipments: this.shipments.map((shipment) => ({ ...shipment })),
       stats: { ...this.shipmentStats },
-
       alerts: this.getStorageAlerts(),
     };
   }
