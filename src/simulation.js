@@ -39,6 +39,12 @@ export class RefinerySimulation {
       jet: 0,
       lpg: 0,
       profitPerHour: 0,
+
+      revenuePerDay: 0,
+      expensePerDay: 0,
+      penaltyPerDay: 0,
+      marginMultiplier: 1,
+
       reliability: 1,
       carbon: 0,
       waste: 0,
@@ -57,6 +63,13 @@ export class RefinerySimulation {
       directiveReliability: 1,
     };
 
+
+    this.marketStress = 0.16;
+    this.pendingOperationalCost = 0;
+    this.logisticsRushCooldown = 0;
+    this.pipelineBoosts = {};
+
+
     this.flows = {
       toReformer: 0,
       toCracker: 0,
@@ -68,7 +81,6 @@ export class RefinerySimulation {
     this.performanceHistory = [];
 
     this.storage = this._initStorage();
-
     this.storageAlertCache = this._createStorageAlertCache();
 
     this.shipments = [];
@@ -260,7 +272,6 @@ export class RefinerySimulation {
     };
   }
 
-
   _unit(id, name, capacity, category) {
     return {
       id,
@@ -324,6 +335,12 @@ export class RefinerySimulation {
       jet: 0,
       lpg: 0,
       profitPerHour: 0,
+
+      revenuePerDay: 0,
+      expensePerDay: 0,
+      penaltyPerDay: 0,
+      marginMultiplier: 1,
+
       reliability: 1,
       carbon: 0,
       waste: 0,
@@ -348,8 +365,12 @@ export class RefinerySimulation {
       toAlkylation: 0,
       toExport: 0,
     };
-    this.storage = this._initStorage();
 
+    this.marketStress = 0.16;
+    this.pendingOperationalCost = 0;
+    this.logisticsRushCooldown = 0;
+    this.pipelineBoosts = {};
+    this.storage = this._initStorage();
     this.storageAlertCache = this._createStorageAlertCache();
 
     this.shipments = [];
@@ -426,6 +447,12 @@ export class RefinerySimulation {
   _advanceTick(deltaMinutes) {
     this.timeMinutes += deltaMinutes;
     const hours = deltaMinutes / 60;
+
+
+    this.logisticsRushCooldown = Math.max(0, this.logisticsRushCooldown - hours);
+    this._prunePipelineBoosts();
+    const extraOperationalCost = this._consumeOperationalCost();
+
 
     const scenario = this.activeScenario;
     const crudeSetting = this.params.crudeIntake;
@@ -506,7 +533,12 @@ export class RefinerySimulation {
       reformer && reformerState.online
         ? reformer.capacity * clamp(reformerState.throttle, 0, 1.2)
         : 0;
-    const reformFeed = Math.min(naphthaPool, reformerCapacity);
+
+    const reformFeed = Math.min(
+      naphthaPool,
+      reformerCapacity * this._pipelineMultiplier("toReformer")
+    );
+
     naphthaPool -= reformFeed;
     if (reformer) {
       reformer.throughput = reformFeed;
@@ -527,19 +559,22 @@ export class RefinerySimulation {
     const fccCapacity =
       fcc && fccState.online ? fcc.capacity * clamp(fccState.throttle, 0, 1.2) : 0;
     const heavyAvailableForFcc = heavyPool + residPool * 0.6;
-    const fccFeed = Math.min(heavyAvailableForFcc, fccCapacity);
+
+    const fccFeed = Math.min(
+      heavyAvailableForFcc,
+      fccCapacity * this._pipelineMultiplier("toCracker")
+    );
+
     const heavyUsedByFcc = Math.min(heavyPool, fccFeed * 0.7);
     heavyPool -= heavyUsedByFcc;
     const residUsedByFcc = Math.min(residPool, fccFeed - heavyUsedByFcc);
     residPool -= residUsedByFcc;
-
 
     if (fcc) {
       fcc.throughput = fccFeed;
       fcc.utilization = fccCapacity > 0 ? fccFeed / fccCapacity : 0;
       this._updateUnitMode(fcc);
     }
-
 
     const fccGasoline = fccFeed * 0.54;
     const fccDiesel = fccFeed * 0.12;
@@ -559,7 +594,11 @@ export class RefinerySimulation {
         : 0;
 
     const hydroFeedAvailable = heavyPool + residPool + dieselPool * 0.25;
-    const hydroFeed = Math.min(hydroFeedAvailable, hydroCapacity);
+    const hydroFeed = Math.min(
+      hydroFeedAvailable,
+      hydroCapacity * this._pipelineMultiplier("toHydrocracker")
+    );
+
 
     const heavyUsedHydro = Math.min(heavyPool, hydroFeed * 0.55);
     heavyPool -= heavyUsedHydro;
@@ -590,7 +629,12 @@ export class RefinerySimulation {
       alkylation && alkylationState.online
         ? alkylation.capacity * clamp(alkylationState.throttle, 0, 1.2)
         : 0;
-    const alkFeed = Math.min(lpgPool, alkCapacity);
+
+    const alkFeed = Math.min(
+      lpgPool,
+      alkCapacity * this._pipelineMultiplier("toAlkylation")
+    );
+
     lpgPool -= alkFeed;
 
     if (alkylation) {
@@ -599,13 +643,11 @@ export class RefinerySimulation {
       this._updateUnitMode(alkylation);
     }
 
-
     const alkGasoline = alkFeed * 0.88;
     const alkLoss = alkFeed * 0.06;
     result.gasoline += alkGasoline;
     result.lpg += lpgPool;
     result.waste += alkLoss;
-
 
     const sulfurState = this._resolveUnitState("sulfur");
     const sulfur = sulfurState.unit;
@@ -643,7 +685,9 @@ export class RefinerySimulation {
     const jetPrice = basePrices.jet * priceModifier * (1 + demandJetBias * 0.35);
     const lpgPrice = basePrices.lpg * priceModifier * (1 + demandGasolineBias * 0.1);
 
-    const crudeCostPerBbl = 53 * (1 + scenario.qualityShift * 0.8);
+
+    const crudeCostPerBbl = 51 * (1 + scenario.qualityShift * 0.8);
+
     const maintenanceBudget =
       2.2 * this.units.length * (0.5 + this.params.maintenance * 1.4 + scenario.maintenancePenalty);
     const safetyBudget = 1.1 * this.params.safety * this.units.length;
@@ -667,10 +711,21 @@ export class RefinerySimulation {
       production: result,
       prices: { gasoline: gasolinePrice, diesel: dieselPrice, jet: jetPrice },
 
+      scenario,
     });
 
     const penalty = incidentsRisk.incidentPenalty + logisticsReport.penalty;
-    const profitPerDay = productRevenue - crudeExpense - operatingExpense - penalty;
+    const fixedOverhead = this._calculateFixedOverhead({ crudeThroughput, scenario });
+    const marketConditions = this._updateMarketConditions({
+      scenario,
+      incidents: incidentsRisk,
+      logistics: logisticsReport,
+    });
+    const adjustedRevenue = productRevenue * marketConditions.multiplier;
+    const carryingCost = marketConditions.carryingCost;
+    const totalOperatingExpense = operatingExpense + fixedOverhead + carryingCost + extraOperationalCost;
+    const profitPerDay = adjustedRevenue - crudeExpense - totalOperatingExpense - penalty;
+
     const profitPerHour = profitPerDay / HOURS_PER_DAY;
 
     this.metrics.gasoline = this._round(result.gasoline);
@@ -678,6 +733,11 @@ export class RefinerySimulation {
     this.metrics.jet = this._round(result.jet);
     this.metrics.lpg = this._round(result.lpg);
     this.metrics.profitPerHour = profitPerHour;
+
+    this.metrics.revenuePerDay = adjustedRevenue;
+    this.metrics.expensePerDay = totalOperatingExpense;
+    this.metrics.penaltyPerDay = penalty;
+    this.metrics.marginMultiplier = marketConditions.multiplier;
     this.metrics.waste = result.waste;
     this.metrics.flareLevel = clamp((result.waste + flare * 1.4) / (crudeThroughput * 0.5 || 1), 0, 1);
     this.metrics.incidents = incidentsRisk.incidents;
@@ -724,6 +784,7 @@ export class RefinerySimulation {
         unit.integrity = 0.65 + Math.random() * 0.25;
         unit.alert = null;
 
+        unit.alertTimer = 6;
         if (unit.alertDetail && unit.alertDetail.kind !== "incident") {
           unit.alertDetail = null;
         }
@@ -845,7 +906,6 @@ export class RefinerySimulation {
           });
           const message = `${unit.name} tripped offline after a ${
             severity === "danger" ? "critical" : "process"
-
           } upset (${cause.detail}).`;
           const guidanceNote = cause.guidance ? ` ${cause.guidance}` : "";
           this.pushLog(severity, `${message}${guidanceNote}`, { unitId: unit.id });
@@ -1000,7 +1060,9 @@ export class RefinerySimulation {
   _updateScorecard(context) {
     const throughputTotal = context.gasoline + context.diesel + context.jet;
     const throughputScore = clamp(throughputTotal / Math.max(1, context.crudeThroughput * 0.92), 0, 1);
-    const profitScore = clamp((context.profitPerHour + 140) / 320, 0, 1);
+
+    const profitScore = clamp((context.profitPerHour + 100) / 240, 0, 1);
+
     const reliabilityScore = clamp(context.reliability, 0, 1);
     const carbonScore = clamp(1 - context.carbon / 140, 0, 1);
     const incidentScore = clamp(1 - context.incidents * 0.18, 0, 1);
@@ -1142,7 +1204,6 @@ export class RefinerySimulation {
     };
   }
 
-
   _createStorageAlertCache() {
     const products = ["gasoline", "diesel", "jet"];
     const cache = {};
@@ -1259,7 +1320,6 @@ export class RefinerySimulation {
       this.storage.levels[product] = clamp(this.storage.levels[product] + volume, 0, capacity);
     });
 
-
     const demandDraw = this._calculateMarketDemand(hours, scenario);
     const demandShortages = [];
     Object.entries(demandDraw).forEach(([product, draw]) => {
@@ -1353,6 +1413,96 @@ export class RefinerySimulation {
     this.metrics.shipmentReliability = shipmentTotal ? clamp(onTime / shipmentTotal, 0, 1) : 1;
 
     return report;
+  }
+
+
+  _consumeOperationalCost() {
+    const cost = this.pendingOperationalCost || 0;
+    this.pendingOperationalCost = 0;
+    return cost;
+  }
+
+  _calculateFixedOverhead({ crudeThroughput, scenario }) {
+    const maintenancePenalty = scenario?.maintenancePenalty || 0;
+    const base = 620 + maintenancePenalty * 320;
+    const throughputLoad = crudeThroughput * (4.8 + maintenancePenalty * 2.6);
+    const maintenanceFactor = 0.6 + (this.params.maintenance || 0) * 0.9;
+    const safetyFactor = 0.45 + (this.params.safety || 0) * 0.7;
+    return (base + throughputLoad) * (0.55 + maintenanceFactor * 0.35 + safetyFactor * 0.25);
+  }
+
+  _updateMarketConditions({ scenario, incidents, logistics }) {
+    if (!Number.isFinite(this.marketStress)) {
+      this.marketStress = 0.16;
+    }
+
+    const storageUtil = this.metrics.storageUtilization || 0;
+    const shipmentReliability = this.metrics.shipmentReliability ?? 1;
+    const directiveReliability = this.metrics.directiveReliability ?? 1;
+    const reliability = this.metrics.reliability ?? 1;
+    const incidentCount = incidents?.incidents || 0;
+    const incidentPenalty = incidents?.incidentPenalty || 0;
+    const demandShortage = logistics?.demandShortage || 0;
+    const scenarioRisk = scenario?.riskMultiplier || 1;
+
+    const basePressure = 0.08 + (scenario?.environmentPressure || 0) * 0.18;
+    const storagePressure = storageUtil > 0.78 ? (storageUtil - 0.78) * 1.05 : 0;
+    const reliabilityPressure = Math.max(0, 1 - reliability) * (0.5 + scenarioRisk * 0.1);
+    const shipmentPressure = Math.max(0, 1 - shipmentReliability) * 0.7;
+    const directivePressure = Math.max(0, 1 - directiveReliability) * 0.45;
+    const shortagePressure = demandShortage > 0 ? Math.min(0.32, demandShortage / 280) : 0;
+    const incidentPressure = Math.min(0.36, incidentCount * 0.06 + incidentPenalty / 900);
+
+    const targetStress = clamp(
+      basePressure +
+        storagePressure +
+        reliabilityPressure +
+        shipmentPressure +
+        directivePressure +
+        shortagePressure +
+        incidentPressure,
+      0.08,
+      0.85
+    );
+
+    this.marketStress += (targetStress - this.marketStress) * 0.16;
+
+    const multiplier = clamp(1 - this.marketStress, 0.35, 1);
+    const carryingCost =
+      storageUtil > 0.55
+        ? Math.pow(storageUtil, 1.35) * 340 + Math.max(0, storageUtil - 0.85) * 640
+        : storageUtil * 120;
+
+    return { multiplier, carryingCost };
+  }
+
+  _pipelineMultiplier(stream) {
+    const boost = this.pipelineBoosts?.[stream];
+    if (!boost) {
+      return 1;
+    }
+    if (boost.expiresAt <= this.timeMinutes) {
+      delete this.pipelineBoosts[stream];
+      return 1;
+    }
+    return typeof boost.multiplier === "number" ? boost.multiplier : 1;
+  }
+
+  _prunePipelineBoosts() {
+    if (!this.pipelineBoosts) {
+      return;
+    }
+    const now = this.timeMinutes;
+    Object.entries({ ...this.pipelineBoosts }).forEach(([stream, boost]) => {
+      if (!boost) {
+        return;
+      }
+      if (boost.expiresAt <= now) {
+        const label = boost.label || stream;
+        this.pushLog("info", `${label} bypass crews stand down; capacity back to normal.`);
+        delete this.pipelineBoosts[stream];
+      }
+    });
   }
 
 
@@ -1450,6 +1600,159 @@ export class RefinerySimulation {
         segment.length ? segment.charAt(0).toUpperCase() + segment.slice(1) : segment
       )
       .join(" ");
+  }
+
+
+  dispatchLogisticsConvoy() {
+    if (this.logisticsRushCooldown > 0.1) {
+      const waitHours = Math.max(1, Math.round(this.logisticsRushCooldown));
+      this.pushLog(
+        "warning",
+        `Convoy already mobilized — wait ~${waitHours} h for crews to reset.`
+      );
+      return false;
+    }
+
+    const storage = this.storage;
+    if (!storage?.levels) {
+      this.pushLog("info", "Storage data unavailable; convoy dispatch skipped.");
+      return false;
+    }
+
+    let targetProduct = null;
+    let highestRatio = 0;
+    Object.entries(storage.levels).forEach(([product, level]) => {
+      const capacity = storage.capacity?.[product] || 0;
+      if (!capacity) {
+        return;
+      }
+      const ratio = clamp(level / capacity, 0, 1.2);
+      if (ratio > highestRatio) {
+        highestRatio = ratio;
+        targetProduct = product;
+      }
+    });
+
+    if (!targetProduct || highestRatio < 0.35) {
+      this.logisticsRushCooldown = Math.max(this.logisticsRushCooldown, 2);
+      this.pushLog("info", "Tanks are already comfortable — no need for a convoy right now.");
+      return false;
+    }
+
+    const capacity = storage.capacity[targetProduct] || 0;
+    const level = storage.levels[targetProduct] || 0;
+    const reliefFraction = Math.min(0.28, 0.14 + highestRatio * 0.24);
+    const relief = Math.min(level, capacity * reliefFraction);
+    if (relief <= 0) {
+      this.pushLog("info", "Convoy stood down — nothing available to move.");
+      return false;
+    }
+
+    storage.levels[targetProduct] = clamp(level - relief, 0, capacity);
+    const label = this._formatProductLabel(targetProduct);
+    this.pendingOperationalCost += 260 + relief * 1.6;
+    this.nextShipmentIn = Math.min(this.nextShipmentIn, 1.05);
+    this.logisticsRushCooldown = 6;
+
+    if (this._countPendingShipments() < 2) {
+      this._scheduleShipment();
+    }
+    if (highestRatio > 0.9) {
+      this._scheduleShipment();
+    }
+
+    this.pushLog(
+      "info",
+      `Convoy cleared ${relief.toFixed(0)} kb of ${label}; trucking charges booked to logistics.`,
+      { product: targetProduct }
+    );
+    return { product: targetProduct, volume: relief };
+  }
+
+  deployPipelineBypass(targetUnitId) {
+    const pipelineMap = {
+      reformer: { stream: "toReformer", label: "reformer feed bypass" },
+      fcc: { stream: "toCracker", label: "FCC transfer line" },
+      hydrocracker: { stream: "toHydrocracker", label: "hydrocracker feed loop" },
+      alkylation: { stream: "toAlkylation", label: "alkylation LPG manifold" },
+    };
+
+    const fallback = pipelineMap.hydrocracker || pipelineMap.fcc;
+    const entry = pipelineMap[targetUnitId] || fallback;
+    if (!entry) {
+      this.pushLog("info", "No suitable pipeline to bypass.");
+      return false;
+    }
+
+    const existing = this.pipelineBoosts?.[entry.stream];
+    if (existing && existing.expiresAt > this.timeMinutes) {
+      const remaining = Math.max(1, Math.round((existing.expiresAt - this.timeMinutes) / 60));
+      this.pushLog("info", `${entry.label} already boosted for ~${remaining} more h.`);
+      return false;
+    }
+
+    const duration = 300 + Math.random() * 120;
+    if (!this.pipelineBoosts) {
+      this.pipelineBoosts = {};
+    }
+    this.pipelineBoosts[entry.stream] = {
+      multiplier: 1.25,
+      expiresAt: this.timeMinutes + duration,
+      label: entry.label,
+    };
+    this.pendingOperationalCost += 180;
+    this.pushLog(
+      "info",
+      `${entry.label} staged; expect extra capacity for ~${Math.round(duration / 60)} h.`
+    );
+    return true;
+  }
+
+  scheduleTurnaround(unitId) {
+    if (!unitId) {
+      this.pushLog("info", "Select a processing unit to schedule a turnaround.");
+      return false;
+    }
+    const unit = this.unitMap[unitId];
+    if (!unit) {
+      this.pushLog("info", "Unknown unit selected.");
+      return false;
+    }
+    if (unit.downtime > 0) {
+      this.pushLog(
+        "warning",
+        unit.name +
+          " already offline for maintenance (" +
+          Math.round(unit.downtime) +
+          " min remaining).",
+        { unitId }
+      );
+      return false;
+    }
+
+    const downtime = 180 + Math.random() * 180;
+    unit.status = "offline";
+    unit.downtime = downtime;
+    unit.throughput = 0;
+    unit.utilization = 0;
+    unit.alert = "warning";
+    unit.alertTimer = Math.max(unit.alertTimer, 120);
+    unit.alertDetail = {
+      kind: "turnaround",
+      severity: "warning",
+      summary: "Turnaround in progress",
+      cause: "Estimated " + Math.round(downtime) + " minutes until restart.",
+      guidance: "Expect improved integrity once crews wrap up.",
+      recordedAt: this._formatTime(),
+    };
+    unit.integrity = clamp(unit.integrity + 0.3, 0, 1);
+    this.pendingOperationalCost += 340;
+    this.pushLog(
+      "info",
+      unit.name + " turnaround scheduled; crews draining and opening equipment.",
+      { unitId }
+    );
+    return true;
   }
 
 

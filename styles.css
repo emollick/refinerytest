@@ -292,7 +292,6 @@ body {
   color: #212121;
 }
 
-
 .toolbar-divider {
   height: 1px;
   background: #6b6b6b;
@@ -359,7 +358,6 @@ body {
   letter-spacing: 0.08em;
   color: rgba(168, 212, 255, 0.85);
 }
-
 
 .prototype-notes {
   margin-top: 6px;
@@ -677,7 +675,6 @@ body {
 .pulse-entry.standby .pulse-status {
   color: rgba(180, 210, 255, 0.9);
 }
-
 
 .pulse-entry.alerting .pulse-status {
   color: rgba(255, 214, 120, 0.96);
@@ -1227,7 +1224,6 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-
 
 .unit-incident-guidance {
   font-style: italic;

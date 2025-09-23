@@ -114,27 +114,28 @@
               <div class="toolbar-divider" role="separator"></div>
               <button
                 type="button"
-                class="toolbar-button ghost"
+
+                class="toolbar-button"
                 data-command="build-road"
-                title="Prototype Edit tool from the Tour Book"
+                title="Dispatch a truck convoy to relieve the fullest product tanks"
               >
-                ROAD*
+                ROAD
               </button>
               <button
                 type="button"
-                class="toolbar-button ghost"
+                class="toolbar-button"
                 data-command="build-pipe"
-                title="Pipelines act like SimCity power lines — still conceptual"
+                title="Stage a temporary bypass for the selected unit’s feed line"
               >
-                PIPE*
+                PIPE
               </button>
               <button
                 type="button"
-                class="toolbar-button ghost"
+                class="toolbar-button"
                 data-command="bulldoze"
-                title="Placeholder bulldozer tool"
+                title="Schedule a planned turnaround for the selected unit"
               >
-                BULLDOZE*
+                MAINT
               </button>
 
             </div>
@@ -225,6 +226,24 @@
                   <span id="profit-output">$0</span>
                 </div>
                 <div class="metric-wide">
+
+                  <h3>Revenue / day</h3>
+                  <span id="revenue-output">$0</span>
+                </div>
+                <div class="metric-wide">
+                  <h3>Operating Cost / day</h3>
+                  <span id="expense-output">$0</span>
+                </div>
+                <div class="metric-wide">
+                  <h3>Penalties / day</h3>
+                  <span id="penalty-output">$0</span>
+                </div>
+                <div class="metric-wide">
+                  <h3>Market Margin</h3>
+                  <span id="margin-output">100%</span>
+                </div>
+                <div class="metric-wide">
+
                   <h3>Reliability</h3>
                   <span id="reliability-output">100%</span>
                 </div>
@@ -311,8 +330,14 @@
           </p>
           <ul class="notes-list">
             <li>
-              Buttons marked with an asterisk are deliberate placeholders. In 1992 they advertised possible editing
-              features; here they log a message just as the Tour Book described.
+
+              Session → Load Old/New now drop you into curated Chevron scenarios — one with deferred maintenance and full
+              tanks, the other chasing jet export contracts.
+            </li>
+            <li>
+              The ROAD, PIPE, and MAINT toolbar commands tie into logistics convoys, temporary feed bypasses, and planned
+              turnarounds so you can actively manage trouble spots.
+
             </li>
             <li>
               Use the <strong>Record</strong> and <strong>Inspect</strong> buttons to trigger the tutorial and inspection callouts that
@@ -323,12 +348,9 @@
               how a misstep in one unit affects the whole plant.
             </li>
             <li>
-              Session → Load Old/New stay intentionally abstract, nodding to the mysterious menu options captured in
-              the original build.
-            </li>
-            <li>
-              Dashboards still surface throughput, logistics, and directives so you can experiment with cause and effect
-              across the refinery without needing a chemical engineering degree.
+
+              The Production Dashboard now breaks out revenue, costs, penalties, and live margin so the impact of each
+              decision shows up immediately.
             </li>
 
           </ul>

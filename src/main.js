@@ -27,8 +27,6 @@ sceneContainer.appendChild(canvas);
 const context = canvas.getContext("2d");
 context.imageSmoothingEnabled = false;
 
-
-
 const simulation = new RefinerySimulation();
 const ui = new UIController(simulation);
 if (typeof ui.setModeBadge === "function") {
@@ -889,6 +887,68 @@ const PRESETS = {
   },
 };
 
+
+const SESSION_PRESETS = {
+  legacy: {
+    scenario: "maintenanceCrunch",
+    params: {
+      crude: 112,
+      focus: 0.46,
+      maintenance: 0.38,
+      safety: 0.34,
+      environment: 0.28,
+    },
+    storageLevels: { gasoline: 212, diesel: 158, jet: 122 },
+    shipments: [
+      { product: "gasoline", volume: 88, window: 4.2, dueIn: 0.9 },
+      { product: "diesel", volume: 74, window: 3.8, dueIn: 0.6 },
+    ],
+    shipmentStats: { total: 4, onTime: 2, missed: 2 },
+    nextShipmentIn: 0.8,
+    units: [
+      { id: "distillation", integrity: 0.58 },
+      { id: "reformer", integrity: 0.4 },
+      { id: "fcc", integrity: 0.45 },
+      { id: "hydrocracker", integrity: 0.42, downtime: 95 },
+      { id: "alkylation", integrity: 0.5 },
+      { id: "sulfur", integrity: 0.56 },
+    ],
+    marketStress: 0.44,
+    timeMinutes: 60 * 9,
+    log: "Recovered training save loaded — tanks brimmed and maintenance overdue.",
+  },
+  modern: {
+    scenario: "exportPush",
+    params: {
+      crude: 168,
+      focus: 0.64,
+      maintenance: 0.55,
+      safety: 0.48,
+      environment: 0.32,
+    },
+    storageLevels: { gasoline: 126, diesel: 104, jet: 68 },
+    shipments: [
+      { product: "jet", volume: 82, window: 5.5, dueIn: 1.6 },
+      { product: "gasoline", volume: 64, window: 4.8, dueIn: 2.1 },
+    ],
+    shipmentStats: { total: 3, onTime: 1, missed: 0 },
+    nextShipmentIn: 1.4,
+    units: [
+      { id: "reformer", integrity: 0.72 },
+      { id: "hydrocracker", integrity: 0.68 },
+      { id: "alkylation", integrity: 0.74 },
+    ],
+    unitOverrides: {
+      hydrocracker: { throttle: 1.08 },
+      sulfur: { throttle: 1.05 },
+    },
+    marketStress: 0.3,
+    timeMinutes: 60 * 3,
+    log: "Modernization drill loaded — chase export contracts without breaking reliability.",
+  },
+};
+
+
 const toolbarPresetButtons = document.querySelectorAll("[data-preset]");
 const toolbarUnitButtons = document.querySelectorAll("[data-unit-target]");
 const toolbarScenarioButtons = document.querySelectorAll("[data-scenario]");
@@ -1023,6 +1083,7 @@ function animate(now) {
   requestAnimationFrame(animate);
 }
 requestAnimationFrame(animate);
+
 
 function applyPreset(name, options = {}) {
   const preset = PRESETS[name];
@@ -1195,16 +1256,11 @@ function handleMenuAction(action) {
     }
 
     case "session-load-old":
-      simulation.pushLog(
-        "info",
-        '"Load Old" is still a prototype prompt, just like the original Whiteboard build.'
-      );
+      loadSessionPreset("legacy");
       break;
     case "session-load-new":
-      simulation.pushLog(
-        "info",
-        '"Load New" is a placeholder in this training prototype — refer to the Tour Book.'
-      );
+      loadSessionPreset("modern");
+
       break;
     case "view-center":
       renderer.resetView();
@@ -1227,7 +1283,7 @@ function handleMenuAction(action) {
 
       renderer.cyclePalette();
       simulation.pushLog("info", "Palette cycled — channeling SimFarm and SimCity swatches.");
-
+=
       break;
     default:
       break;
@@ -1273,6 +1329,139 @@ function performSimulationReset() {
   populateUnitMenu();
   ui.setRunning(true);
 }
+
+
+function loadSessionPreset(key) {
+  const preset = SESSION_PRESETS[key];
+  if (!preset) {
+    simulation.pushLog("info", "Preset scenario not available yet.");
+    return;
+  }
+
+  simulation.reset();
+
+  if (preset.scenario) {
+    simulation.applyScenario(preset.scenario);
+  }
+
+  if (preset.params) {
+    if (typeof preset.params.crude === "number") {
+      simulation.setParam("crudeIntake", preset.params.crude);
+    }
+    if (typeof preset.params.focus === "number") {
+      simulation.setParam("productFocus", preset.params.focus);
+    }
+    if (typeof preset.params.maintenance === "number") {
+      simulation.setParam("maintenance", preset.params.maintenance);
+    }
+    if (typeof preset.params.safety === "number") {
+      simulation.setParam("safety", preset.params.safety);
+    }
+    if (typeof preset.params.environment === "number") {
+      simulation.setParam("environment", preset.params.environment);
+    }
+  }
+
+  if (typeof preset.timeMinutes === "number") {
+    simulation.timeMinutes = preset.timeMinutes;
+  }
+
+  if (typeof preset.marketStress === "number") {
+    simulation.marketStress = clamp(preset.marketStress, 0, 0.85);
+  }
+
+  if (preset.storageLevels && simulation.storage?.levels) {
+    Object.entries(preset.storageLevels).forEach(([product, level]) => {
+      if (simulation.storage.levels[product] !== undefined) {
+        const capacity = simulation.storage.capacity[product] || level;
+        simulation.storage.levels[product] = clamp(level, 0, capacity);
+      }
+    });
+  }
+
+  simulation.shipments = [];
+  if (Array.isArray(preset.shipments)) {
+    const now = simulation.timeMinutes || 0;
+    simulation.shipments = preset.shipments.map((shipment) => ({
+      id: shipment.id || `preset-${shipment.product}-${Math.random().toString(16).slice(2, 6)}`,
+      product: shipment.product,
+      volume: shipment.volume,
+      window: shipment.window,
+      dueIn: shipment.dueIn ?? shipment.window,
+      status: shipment.status || "pending",
+      createdAt: now,
+      cooldown: shipment.cooldown || 0,
+    }));
+  }
+
+  if (preset.shipmentStats) {
+    simulation.shipmentStats = {
+      total: preset.shipmentStats.total ?? 0,
+      onTime: preset.shipmentStats.onTime ?? 0,
+      missed: preset.shipmentStats.missed ?? 0,
+    };
+  }
+
+  if (typeof preset.nextShipmentIn === "number") {
+    simulation.nextShipmentIn = preset.nextShipmentIn;
+  }
+
+  if (Array.isArray(preset.units)) {
+    preset.units.forEach((entry) => {
+      const unit = simulation.unitMap?.[entry.id];
+      if (!unit) {
+        return;
+      }
+      if (typeof entry.integrity === "number") {
+        unit.integrity = clamp(entry.integrity, 0, 1);
+      }
+      if (typeof entry.downtime === "number" && entry.downtime > 0) {
+        unit.downtime = entry.downtime;
+        unit.status = "offline";
+      }
+      if (entry.status) {
+        unit.status = entry.status;
+      }
+    });
+  }
+
+  simulation.unitOverrides = {};
+  if (preset.unitOverrides) {
+    Object.entries(preset.unitOverrides).forEach(([unitId, override]) => {
+      if (typeof override.throttle === "number") {
+        simulation.setUnitThrottle(unitId, override.throttle, { quiet: true });
+      }
+      if (override.offline) {
+        simulation.setUnitOffline(unitId, true, { quiet: true });
+      }
+    });
+  }
+
+  simulation.pendingOperationalCost = 0;
+  simulation.logisticsRushCooldown = 0;
+  simulation.performanceHistory = [];
+  simulation.update(1);
+
+  activePreset = null;
+  updatePresetButtons(null);
+  ui.refreshControls();
+  ui.setScenario(simulation.activeScenarioKey);
+  updateScenarioButtons(simulation.activeScenarioKey);
+  setSelectedUnit(null);
+  ui.selectUnit(null);
+  updateUnitButtons(null);
+  populateUnitMenu();
+  ui.setRunning(simulation.running);
+  if (typeof ui.setModeBadge === "function") {
+    ui.setModeBadge("CUSTOM");
+  }
+  updateMenuToggle(simulation.running);
+  renderer.resetView?.();
+
+  const message = preset.log || "Session preset loaded.";
+  simulation.pushLog("info", message);
+}
+
 
 function exportSnapshot() {
   const snapshot = simulation.createSnapshot();
@@ -1508,7 +1697,6 @@ function refreshUnitPulse(time, force = false) {
     entry.item.classList.toggle("selected", selectedUnitId === unit.id);
     entry.item.classList.toggle("alerting", Boolean(unit.alert));
   });
-
 
   renderAlertCallouts();
 }
@@ -1919,13 +2107,20 @@ function handleToolbarCommand(command) {
         "Inspection window is mostly blank in the original prototype — guidance comes from the Tour Book."
       );
       break;
-    case "build-pipe":
-    case "bulldoze":
+
     case "build-road":
-      simulation.pushLog(
-        "info",
-        `${command.replace("-", " ")} is a suggested capability Chevron explored but never finished."
-      );
+      simulation.dispatchLogisticsConvoy();
+      break;
+    case "build-pipe": {
+      const success = simulation.deployPipelineBypass(selectedUnitId);
+      if (success && selectedUnitId) {
+        highlightPipelinesForUnit(selectedUnitId);
+      }
+      break;
+    }
+    case "bulldoze":
+      simulation.scheduleTurnaround(selectedUnitId);
+
       break;
     default:
       break;
@@ -1939,13 +2134,15 @@ function renderPrototypeNotes() {
   prototypeNotes.innerHTML = "";
   const history = document.createElement("p");
   history.textContent =
-    "Like the recovered build from Richmond, this interface splits Map and Edit views and keeps the editing palette as a tour of future possibilities.";
+
+    "Recovered Richmond interface now wires convoy drills, pipeline bypasses, and scenario loads directly into the edit console.";
   const placeholders = document.createElement("ul");
   placeholders.className = "prototype-list";
   [
-    "Most Edit tools are non-functional, mirroring the placeholder buttons Maxis Business Simulations shipped to Chevron.",
-    "Recordings can be played back for classes — load the included tutorial from the Session menu to watch a 1992 demo.",
-    "External events such as hot oil fires, lightning, and abrasive clouds loop during training just like the original prototype.",
+    "Session → Load Old/New drop you into curated Chevron training scenarios with different bottlenecks to solve.",
+    "ROAD dispatches a truck convoy to bleed down whichever product tanks are overflowing the most.",
+    "PIPE stages a temporary bypass for the selected unit’s feed, while BULLDOZE schedules a turnaround to restore integrity.",
+
   ].forEach((line) => {
     const item = document.createElement("li");
     item.textContent = line;

@@ -5,7 +5,6 @@ const PRODUCT_LABELS = {
   jet: "Jet Fuel",
 };
 
-
 export class UIController {
   constructor(simulation) {
     this.simulation = simulation;
@@ -38,6 +37,12 @@ export class UIController {
       jetOutput: document.getElementById("jet-output"),
       lpgOutput: document.getElementById("lpg-output"),
       profitOutput: document.getElementById("profit-output"),
+
+      revenueOutput: document.getElementById("revenue-output"),
+      expenseOutput: document.getElementById("expense-output"),
+      penaltyOutput: document.getElementById("penalty-output"),
+      marginOutput: document.getElementById("margin-output"),
+
       reliabilityOutput: document.getElementById("reliability-output"),
       carbonOutput: document.getElementById("carbon-output"),
       scoreGrade: document.getElementById("score-grade"),
@@ -302,6 +307,34 @@ export class UIController {
     this.elements.profitOutput.textContent = `${this.profitFormatter.format(
       Math.round(metrics.profitPerHour * 1000)
     )} / hr`;
+
+
+    if (this.elements.revenueOutput) {
+      const revenue = typeof metrics.revenuePerDay === "number" ? metrics.revenuePerDay : 0;
+      this.elements.revenueOutput.textContent = `${this.profitFormatter.format(
+        Math.round(revenue * 1000)
+      )} / day`;
+    }
+
+    if (this.elements.expenseOutput) {
+      const expense = typeof metrics.expensePerDay === "number" ? metrics.expensePerDay : 0;
+      this.elements.expenseOutput.textContent = `${this.profitFormatter.format(
+        Math.round(expense * 1000)
+      )} / day`;
+    }
+
+    if (this.elements.penaltyOutput) {
+      const penalty = typeof metrics.penaltyPerDay === "number" ? metrics.penaltyPerDay : 0;
+      this.elements.penaltyOutput.textContent = `${this.profitFormatter.format(
+        Math.round(penalty * 1000)
+      )} / day`;
+    }
+
+    if (this.elements.marginOutput) {
+      const margin = typeof metrics.marginMultiplier === "number" ? metrics.marginMultiplier : 0;
+      this.elements.marginOutput.textContent = `${Math.round(margin * 100)}%`;
+    }
+
 
     this.elements.reliabilityOutput.textContent = `${Math.round(metrics.reliability * 100)}%`;
     this.elements.carbonOutput.textContent = `${metrics.carbon.toFixed(1)} tCO₂-eq`;
