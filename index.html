@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>SimRefinery Desk - Tile prototype</title>
+
     <link rel="stylesheet" href="styles.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -25,8 +25,10 @@
             <label class="menu-entry file-entry" data-action="session-import" for="session-import-input"
               >Import Snapshot…<input type="file" id="session-import-input" accept="application/json" hidden /></label
             >
+
             <button type="button" class="menu-entry" data-action="session-load-old">Load Old…</button>
             <button type="button" class="menu-entry" data-action="session-load-new">Load New…</button>
+
             <div class="menu-separator" role="separator"></div>
             <button type="button" class="menu-entry" data-action="session-speed-slower">Slow Down Time</button>
             <button type="button" class="menu-entry" data-action="session-speed-normal">Normal Time</button>
@@ -110,6 +112,7 @@
               <div class="toolbar-divider" role="separator"></div>
               <button
                 type="button"
+
                 class="toolbar-button"
                 data-command="build-road"
                 title="Dispatch a truck convoy to relieve the fullest product tanks"
@@ -132,6 +135,7 @@
               >
                 MAINT
               </button>
+
             </div>
             <div class="map-area">
               <div id="map-viewport" aria-hidden="false">
@@ -139,9 +143,11 @@
               </div>
               <section class="map-status" aria-live="polite" aria-label="Unit quick status overview">
                 <h3>Unit Pulse</h3>
+
                 <div id="alert-callouts" class="alert-callouts" aria-live="polite"></div>
                 <ul id="unit-pulse"></ul>
                 <div id="prototype-notes" class="prototype-notes" aria-live="polite"></div>
+
               </section>
             </div>
           </div>
@@ -218,6 +224,7 @@
                   <span id="profit-output">$0</span>
                 </div>
                 <div class="metric-wide">
+
                   <h3>Revenue / day</h3>
                   <span id="revenue-output">$0</span>
                 </div>
@@ -234,6 +241,7 @@
                   <span id="margin-output">100%</span>
                 </div>
                 <div class="metric-wide">
+
                   <h3>Reliability</h3>
                   <span id="reliability-output">100%</span>
                 </div>
@@ -320,12 +328,14 @@
           </p>
           <ul class="notes-list">
             <li>
+
               Session → Load Old/New now drop you into curated Chevron scenarios — one with deferred maintenance and full
               tanks, the other chasing jet export contracts.
             </li>
             <li>
               The ROAD, PIPE, and MAINT toolbar commands tie into logistics convoys, temporary feed bypasses, and planned
               turnarounds so you can actively manage trouble spots.
+
             </li>
             <li>
               Use the <strong>Record</strong> and <strong>Inspect</strong> buttons to trigger the tutorial and inspection callouts that
@@ -336,9 +346,11 @@
               how a misstep in one unit affects the whole plant.
             </li>
             <li>
+
               The Production Dashboard now breaks out revenue, costs, penalties, and live margin so the impact of each
               decision shows up immediately.
             </li>
+
           </ul>
         </div>
       </section>

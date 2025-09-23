@@ -1,3 +1,4 @@
+
 const PRODUCT_LABELS = {
   gasoline: "Gasoline",
   diesel: "Diesel",
@@ -10,6 +11,7 @@ export class UIController {
     this.selectedUnitId = null;
     this.lastLogSignature = "";
     this.modeFlashTimeout = null;
+
     this.processTopology =
       typeof simulation.getProcessTopology === "function" ? simulation.getProcessTopology() : {};
     this.latestFlows = {};
@@ -35,10 +37,12 @@ export class UIController {
       jetOutput: document.getElementById("jet-output"),
       lpgOutput: document.getElementById("lpg-output"),
       profitOutput: document.getElementById("profit-output"),
+
       revenueOutput: document.getElementById("revenue-output"),
       expenseOutput: document.getElementById("expense-output"),
       penaltyOutput: document.getElementById("penalty-output"),
       marginOutput: document.getElementById("margin-output"),
+
       reliabilityOutput: document.getElementById("reliability-output"),
       carbonOutput: document.getElementById("carbon-output"),
       scoreGrade: document.getElementById("score-grade"),
@@ -58,6 +62,7 @@ export class UIController {
       shipmentList: document.getElementById("shipment-list"),
       shipmentReliability: document.getElementById("shipment-reliability"),
       directiveList: document.getElementById("directive-list"),
+
     };
 
     this.profitFormatter = new Intl.NumberFormat("en-US", {
@@ -65,7 +70,9 @@ export class UIController {
       currency: "USD",
       maximumFractionDigits: 0,
     });
+
     this.flowFormatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
+
 
     this._bindControls();
     this._populateScenarios();
@@ -799,11 +806,13 @@ export class UIController {
     alertBox.classList.add("unit-incident");
     alertBox.classList.add(detail.severity === "danger" ? "danger" : "warning");
     const title = document.createElement("strong");
+
     title.textContent = detail.summary
       ? detail.summary
       : detail.severity === "danger"
       ? "Critical incident"
       : "Process upset";
+
     alertBox.appendChild(title);
     if (detail.cause) {
       const cause = document.createElement("p");

@@ -1,3 +1,4 @@
+
 import { RefinerySimulation } from "./simulation.js";
 import { UIController } from "./ui.js";
 
@@ -11,6 +12,7 @@ const scenarioMenu = document.getElementById("scenario-menu");
 const unitMenu = document.getElementById("unit-menu");
 const importInput = document.getElementById("session-import-input");
 const unitPulseList = document.getElementById("unit-pulse");
+
 const mapToolbar = document.querySelector(".map-toolbar");
 const prototypeNotes = document.getElementById("prototype-notes");
 const gridToggleButton = menuBar?.querySelector('[data-action="view-toggle-grid"]');
@@ -32,6 +34,7 @@ if (typeof ui.setModeBadge === "function") {
 }
 
 const processTopology = simulation.getProcessTopology?.() || {};
+
 const unitConnectionIndex = buildUnitConnectionIndex(processTopology);
 
 const unitConfigs = [
@@ -369,6 +372,7 @@ class TileRenderer {
       { type: "recording", x: 6.8, y: 0.6 },
     ];
   }
+
 
   _drawTiles(palette) {
     const ctx = this.context;
@@ -850,6 +854,7 @@ let lastPulseRefresh = 0;
 let gridVisible = true;
 let flowOverlayVisible = true;
 let activeMenu = null;
+
 const PRESETS = {
   auto: {
     label: "AUTO",
@@ -873,12 +878,14 @@ const PRESETS = {
     label: "SHUTDN",
     crude: 0,
     focus: 0.5,
+
     maintenance: 0.82,
     safety: 0.72,
     environment: 0.55,
     log: "Emergency shutdown drill initiated.",
   },
 };
+
 
 const SESSION_PRESETS = {
   legacy: {
@@ -939,6 +946,7 @@ const SESSION_PRESETS = {
     log: "Modernization drill loaded — chase export contracts without breaking reliability.",
   },
 };
+
 
 const toolbarPresetButtons = document.querySelectorAll("[data-preset]");
 const toolbarUnitButtons = document.querySelectorAll("[data-unit-target]");
@@ -1074,6 +1082,7 @@ function animate(now) {
   requestAnimationFrame(animate);
 }
 requestAnimationFrame(animate);
+
 function applyPreset(name, options = {}) {
   const preset = PRESETS[name];
   if (!preset) {
@@ -1243,15 +1252,18 @@ function handleMenuAction(action) {
       simulation.pushLog("info", `Time scale increased to ${multiplier.toFixed(2)}× baseline.`);
       break;
     }
+
     case "session-load-old":
       loadSessionPreset("legacy");
       break;
     case "session-load-new":
       loadSessionPreset("modern");
+
       break;
     case "view-center":
       renderer.resetView();
       simulation.pushLog("info", "Viewport recentered over refinery layout.");
+
       break;
     case "view-toggle-grid": {
       const nextState = !gridVisible;
@@ -1266,8 +1278,10 @@ function handleMenuAction(action) {
       break;
     }
     case "view-cycle-light":
+
       renderer.cyclePalette();
       simulation.pushLog("info", "Palette cycled — channeling SimFarm and SimCity swatches.");
+
       break;
     default:
       break;
@@ -1282,15 +1296,19 @@ function updateToggleButton(button, visible, hideLabel, showLabel) {
 
 function setGridVisibility(visible) {
   gridVisible = visible;
+
   renderer.setGridVisible(visible);
+
   updateToggleButton(gridToggleButton, gridVisible, "Hide Grid Overlay", "Show Grid Overlay");
 }
 
 function setFlowVisibility(visible) {
   flowOverlayVisible = visible;
+
   renderer.setFlowVisible(visible);
   updateToggleButton(flowToggleButton, flowOverlayVisible, "Hide Flow Glow", "Show Flow Glow");
 }
+
 
 function performSimulationReset() {
   simulation.reset();
@@ -1309,6 +1327,7 @@ function performSimulationReset() {
   populateUnitMenu();
   ui.setRunning(true);
 }
+
 
 function loadSessionPreset(key) {
   const preset = SESSION_PRESETS[key];
@@ -1441,6 +1460,7 @@ function loadSessionPreset(key) {
   simulation.pushLog("info", message);
 }
 
+
 function exportSnapshot() {
   const snapshot = simulation.createSnapshot();
   const json = JSON.stringify(snapshot, null, 2);
@@ -1490,6 +1510,7 @@ function handleSnapshotImport(event) {
   reader.readAsText(file);
   event.target.value = "";
 }
+
 function populateScenarioMenu() {
   if (!scenarioMenu) {
     return;
@@ -1529,6 +1550,7 @@ function populateUnitMenu() {
     unitMenu.appendChild(button);
   });
   updateUnitMenuActive(selectedUnitId);
+
 }
 
 function updateUnitMenuActive(unitId) {
@@ -1650,12 +1672,16 @@ function refreshUnitPulse(time, force = false) {
   simulation.getUnits().forEach((unit) => {
     const entry = unitPulseEntries.get(unit.id);
     if (!entry) return;
+
     const utilization = clamp(unit.utilization ?? 0, 0, 1.4);
+
     const normalizedLoad = Math.min(utilization, 1);
     entry.loadFill.style.width = `${(normalizedLoad * 100).toFixed(1)}%`;
     entry.loadFill.style.background = getLoadGradient(normalizedLoad, utilization > 1);
     entry.loadValue.textContent = `${Math.round(utilization * 100)}%`;
+
     const integrity = clamp(unit.integrity ?? 0, 0, 1);
+
     entry.integrityFill.style.width = `${(integrity * 100).toFixed(1)}%`;
     entry.integrityFill.style.background = getIntegrityGradient(integrity);
     entry.integrityValue.textContent = `${Math.round(integrity * 100)}%`;
@@ -1972,6 +1998,7 @@ function updateMenuToggle(running) {
   if (!menuToggle) return;
   menuToggle.textContent = running ? "Pause" : "Resume";
   menuToggle.setAttribute("aria-pressed", running ? "false" : "true");
+
 }
 
 function buildProcessLegend() {
@@ -1998,6 +2025,7 @@ function buildProcessLegend() {
     item.setAttribute("role", "button");
     item.tabIndex = 0;
     const name = document.createElement("span");
+
     name.textContent = entry.name || unitId;
     item.appendChild(name);
     const summary = document.createElement("small");
@@ -2019,6 +2047,7 @@ function buildProcessLegend() {
         clearPipelineHighlight();
       }
     });
+
     item.addEventListener("click", () => {
       setSelectedUnit(unitId);
       ui.selectUnit(unitId);
@@ -2030,11 +2059,13 @@ function buildProcessLegend() {
         ui.selectUnit(unitId);
       }
     });
+
     list.appendChild(item);
   });
   legend.appendChild(list);
   mapStatusPanel.appendChild(legend);
 }
+
 
 function highlightPipelinesForUnit(unitId) {
   if (!unitId) {
@@ -2074,6 +2105,7 @@ function handleToolbarCommand(command) {
         "Inspection window is mostly blank in the original prototype — guidance comes from the Tour Book."
       );
       break;
+
     case "build-road":
       simulation.dispatchLogisticsConvoy();
       break;
@@ -2086,6 +2118,7 @@ function handleToolbarCommand(command) {
     }
     case "bulldoze":
       simulation.scheduleTurnaround(selectedUnitId);
+
       break;
     default:
       break;
@@ -2099,6 +2132,7 @@ function renderPrototypeNotes() {
   prototypeNotes.innerHTML = "";
   const history = document.createElement("p");
   history.textContent =
+
     "Recovered Richmond interface now wires convoy drills, pipeline bypasses, and scenario loads directly into the edit console.";
   const placeholders = document.createElement("ul");
   placeholders.className = "prototype-list";
@@ -2106,6 +2140,7 @@ function renderPrototypeNotes() {
     "Session → Load Old/New drop you into curated Chevron training scenarios with different bottlenecks to solve.",
     "ROAD dispatches a truck convoy to bleed down whichever product tanks are overflowing the most.",
     "PIPE stages a temporary bypass for the selected unit’s feed, while BULLDOZE schedules a turnaround to restore integrity.",
+
   ].forEach((line) => {
     const item = document.createElement("li");
     item.textContent = line;
@@ -2135,4 +2170,5 @@ function buildUnitConnectionIndex(topology) {
   });
   return map;
 }
+
 

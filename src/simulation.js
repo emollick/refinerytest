@@ -39,10 +39,12 @@ export class RefinerySimulation {
       jet: 0,
       lpg: 0,
       profitPerHour: 0,
+
       revenuePerDay: 0,
       expensePerDay: 0,
       penaltyPerDay: 0,
       marginMultiplier: 1,
+
       reliability: 1,
       carbon: 0,
       waste: 0,
@@ -61,10 +63,12 @@ export class RefinerySimulation {
       directiveReliability: 1,
     };
 
+
     this.marketStress = 0.16;
     this.pendingOperationalCost = 0;
     this.logisticsRushCooldown = 0;
     this.pipelineBoosts = {};
+
 
     this.flows = {
       toReformer: 0,
@@ -78,6 +82,7 @@ export class RefinerySimulation {
 
     this.storage = this._initStorage();
     this.storageAlertCache = this._createStorageAlertCache();
+
     this.shipments = [];
     this.shipmentStats = { total: 0, onTime: 0, missed: 0 };
     this.nextShipmentIn = 2.5;
@@ -281,11 +286,13 @@ export class RefinerySimulation {
       incidents: 0,
       alert: null,
       alertTimer: 0,
+
       manualOffline: false,
       emergencyOffline: false,
       overrideThrottle: 1,
       alertDetail: null,
       lastIncident: null,
+
     };
   }
 
@@ -328,10 +335,12 @@ export class RefinerySimulation {
       jet: 0,
       lpg: 0,
       profitPerHour: 0,
+
       revenuePerDay: 0,
       expensePerDay: 0,
       penaltyPerDay: 0,
       marginMultiplier: 1,
+
       reliability: 1,
       carbon: 0,
       waste: 0,
@@ -356,12 +365,14 @@ export class RefinerySimulation {
       toAlkylation: 0,
       toExport: 0,
     };
+
     this.marketStress = 0.16;
     this.pendingOperationalCost = 0;
     this.logisticsRushCooldown = 0;
     this.pipelineBoosts = {};
     this.storage = this._initStorage();
     this.storageAlertCache = this._createStorageAlertCache();
+
     this.shipments = [];
     this.shipmentStats = { total: 0, onTime: 0, missed: 0 };
     this.nextShipmentIn = 2.5;
@@ -370,6 +381,7 @@ export class RefinerySimulation {
     this._seedDirectives();
     this.unitOverrides = {};
     this.emergencyShutdown = false;
+
     this.units.forEach((unit) => {
       unit.throughput = 0;
       unit.utilization = 0;
@@ -436,13 +448,16 @@ export class RefinerySimulation {
     this.timeMinutes += deltaMinutes;
     const hours = deltaMinutes / 60;
 
+
     this.logisticsRushCooldown = Math.max(0, this.logisticsRushCooldown - hours);
     this._prunePipelineBoosts();
     const extraOperationalCost = this._consumeOperationalCost();
 
+
     const scenario = this.activeScenario;
     const crudeSetting = this.params.crudeIntake;
     const crudeAvailable = crudeSetting * scenario.crudeMultiplier;
+
 
     const distState = this._resolveUnitState("distillation");
     const distillation = distState.unit;
@@ -518,10 +533,12 @@ export class RefinerySimulation {
       reformer && reformerState.online
         ? reformer.capacity * clamp(reformerState.throttle, 0, 1.2)
         : 0;
+
     const reformFeed = Math.min(
       naphthaPool,
       reformerCapacity * this._pipelineMultiplier("toReformer")
     );
+
     naphthaPool -= reformFeed;
     if (reformer) {
       reformer.throughput = reformFeed;
@@ -541,10 +558,12 @@ export class RefinerySimulation {
     const fccCapacity =
       fcc && fccState.online ? fcc.capacity * clamp(fccState.throttle, 0, 1.2) : 0;
     const heavyAvailableForFcc = heavyPool + residPool * 0.6;
+
     const fccFeed = Math.min(
       heavyAvailableForFcc,
       fccCapacity * this._pipelineMultiplier("toCracker")
     );
+
     const heavyUsedByFcc = Math.min(heavyPool, fccFeed * 0.7);
     heavyPool -= heavyUsedByFcc;
     const residUsedByFcc = Math.min(residPool, fccFeed - heavyUsedByFcc);
@@ -572,6 +591,7 @@ export class RefinerySimulation {
       hydrocracker && hydroState.online
         ? hydrocracker.capacity * clamp(hydroState.throttle, 0, 1.2)
         : 0;
+
     const hydroFeedAvailable = heavyPool + residPool + dieselPool * 0.25;
     const hydroFeed = Math.min(
       hydroFeedAvailable,
@@ -607,10 +627,12 @@ export class RefinerySimulation {
       alkylation && alkylationState.online
         ? alkylation.capacity * clamp(alkylationState.throttle, 0, 1.2)
         : 0;
+
     const alkFeed = Math.min(
       lpgPool,
       alkCapacity * this._pipelineMultiplier("toAlkylation")
     );
+
     lpgPool -= alkFeed;
 
     if (alkylation) {
@@ -636,6 +658,7 @@ export class RefinerySimulation {
       sulfur.utilization = sulfurCapacity > 0 ? sulfurFeed / sulfurCapacity : 0;
       this._updateUnitMode(sulfur);
     }
+
     residPool -= sulfurFeed * 0.6;
     heavyPool -= sulfurFeed * 0.4;
     result.sulfur += sulfurRemoved;
@@ -660,7 +683,9 @@ export class RefinerySimulation {
     const jetPrice = basePrices.jet * priceModifier * (1 + demandJetBias * 0.35);
     const lpgPrice = basePrices.lpg * priceModifier * (1 + demandGasolineBias * 0.1);
 
+
     const crudeCostPerBbl = 51 * (1 + scenario.qualityShift * 0.8);
+
     const maintenanceBudget =
       2.2 * this.units.length * (0.5 + this.params.maintenance * 1.4 + scenario.maintenancePenalty);
     const safetyBudget = 1.1 * this.params.safety * this.units.length;
@@ -683,6 +708,7 @@ export class RefinerySimulation {
       hours,
       production: result,
       prices: { gasoline: gasolinePrice, diesel: dieselPrice, jet: jetPrice },
+
       scenario,
     });
 
@@ -697,6 +723,7 @@ export class RefinerySimulation {
     const carryingCost = marketConditions.carryingCost;
     const totalOperatingExpense = operatingExpense + fixedOverhead + carryingCost + extraOperationalCost;
     const profitPerDay = adjustedRevenue - crudeExpense - totalOperatingExpense - penalty;
+
     const profitPerHour = profitPerDay / HOURS_PER_DAY;
 
     this.metrics.gasoline = this._round(result.gasoline);
@@ -704,6 +731,7 @@ export class RefinerySimulation {
     this.metrics.jet = this._round(result.jet);
     this.metrics.lpg = this._round(result.lpg);
     this.metrics.profitPerHour = profitPerHour;
+
     this.metrics.revenuePerDay = adjustedRevenue;
     this.metrics.expensePerDay = totalOperatingExpense;
     this.metrics.penaltyPerDay = penalty;
@@ -753,10 +781,12 @@ export class RefinerySimulation {
         unit.status = "online";
         unit.integrity = 0.65 + Math.random() * 0.25;
         unit.alert = null;
+
         unit.alertTimer = 6;
         if (unit.alertDetail && unit.alertDetail.kind !== "incident") {
           unit.alertDetail = null;
         }
+
         this.pushLog("info", `${unit.name} cleared maintenance and is back online.`, {
           unitId: unit.id,
         });
@@ -837,10 +867,12 @@ export class RefinerySimulation {
 
     Object.values(units).forEach((unit) => {
       if (!unit) return;
+
       if (unit.status === "standby") {
         integritySum += unit.integrity;
         return;
       }
+
       const utilization = unit.utilization || 0;
       const baseWear = 0.004 * context.hours;
       const stressWear = Math.max(0, utilization - 1) * 0.04 * context.hours;
@@ -875,6 +907,7 @@ export class RefinerySimulation {
           } upset (${cause.detail}).`;
           const guidanceNote = cause.guidance ? ` ${cause.guidance}` : "";
           this.pushLog(severity, `${message}${guidanceNote}`, { unitId: unit.id });
+
           if (severity === "danger") {
             this.pushLog(
               "danger",
@@ -884,12 +917,14 @@ export class RefinerySimulation {
           }
           unit.alert = severity;
           unit.alertTimer = Math.max(unit.alertTimer, severity === "danger" ? 180 : 90);
+
           unit.alertDetail = {
             kind: "incident",
             severity,
             summary: cause.summary,
             cause: cause.detail,
             guidance: cause.guidance,
+
             recordedAt: this._formatTime(),
             integrity: unit.integrity,
             overload,
@@ -897,6 +932,7 @@ export class RefinerySimulation {
             safety,
           };
           unit.lastIncident = { ...unit.alertDetail };
+
         }
       }
     });
@@ -915,6 +951,7 @@ export class RefinerySimulation {
 
   _describeIncidentCause(details) {
     const reasons = [];
+
     const summaryHints = [];
     if (details.overload > 0.25) {
       reasons.push("overpressure from aggressive throughput");
@@ -929,6 +966,7 @@ export class RefinerySimulation {
     } else if (details.integrity < 0.3) {
       reasons.push("aging hardware under stress");
       summaryHints.push("Integrity stress");
+
     }
     if (details.maintenance < 0.45) {
       reasons.push("maintenance backlog");
@@ -941,6 +979,7 @@ export class RefinerySimulation {
     }
     if (!reasons.length) {
       reasons.push("process variability");
+
       summaryHints.push("Process instability");
     }
 
@@ -980,6 +1019,7 @@ export class RefinerySimulation {
     };
   }
 
+
   getMetrics() {
     return { ...this.metrics };
   }
@@ -1018,7 +1058,9 @@ export class RefinerySimulation {
   _updateScorecard(context) {
     const throughputTotal = context.gasoline + context.diesel + context.jet;
     const throughputScore = clamp(throughputTotal / Math.max(1, context.crudeThroughput * 0.92), 0, 1);
+
     const profitScore = clamp((context.profitPerHour + 100) / 240, 0, 1);
+
     const reliabilityScore = clamp(context.reliability, 0, 1);
     const carbonScore = clamp(1 - context.carbon / 140, 0, 1);
     const incidentScore = clamp(1 - context.incidents * 0.18, 0, 1);
@@ -1177,6 +1219,7 @@ export class RefinerySimulation {
     return cache;
   }
 
+
   _countPendingShipments() {
     return this.shipments.filter((shipment) => shipment.status === "pending").length;
   }
@@ -1185,6 +1228,7 @@ export class RefinerySimulation {
     const productPool = ["gasoline", "gasoline", "diesel", "diesel", "jet"];
     const product = productPool[Math.floor(Math.random() * productPool.length)];
     const base = product === "jet" ? 46 : product === "diesel" ? 54 : 60;
+
     const capacityTotal =
       this.storage.capacity.gasoline +
       this.storage.capacity.diesel +
@@ -1199,6 +1243,7 @@ export class RefinerySimulation {
     const windowScale = Math.max(0.55, 1 - urgency * 0.5);
     const volume = Math.round(randomRange(base * 0.75, base * 1.35) * volumeMultiplier);
     const window = Math.max(2.5, randomRange(4, 7.5) * windowScale);
+
     const shipment = {
       id: `ship-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
       product,
@@ -1259,7 +1304,9 @@ export class RefinerySimulation {
   }
 
   _updateLogistics(context) {
+
     const { production, hours, prices, scenario } = context;
+
     const produced = {
       gasoline: Math.max(0, production.gasoline * hours),
       diesel: Math.max(0, production.diesel * hours),
@@ -1305,6 +1352,7 @@ export class RefinerySimulation {
       }
     }
 
+
     if (this._countPendingShipments() < 3 && this.nextShipmentIn <= 0) {
       this._scheduleShipment();
       this.nextShipmentIn = randomRange(2.5, 5.5);
@@ -1314,6 +1362,7 @@ export class RefinerySimulation {
       delivered: { gasoline: 0, diesel: 0, jet: 0 },
       failed: 0,
       penalty: 0,
+
       demandShortage: 0,
     };
 
@@ -1452,6 +1501,7 @@ export class RefinerySimulation {
     });
   }
 
+
   _calculateMarketDemand(hours, scenario) {
     const baseDemand = { gasoline: 58, diesel: 46, jet: 34 };
     const focus = clamp(this.params.productFocus, 0, 1);
@@ -1547,6 +1597,7 @@ export class RefinerySimulation {
       )
       .join(" ");
   }
+
 
   dispatchLogisticsConvoy() {
     if (this.logisticsRushCooldown > 0.1) {
@@ -1879,6 +1930,7 @@ export class RefinerySimulation {
 
   _updateAlerts(deltaMinutes) {
     this.units.forEach((unit) => {
+
       if (!unit) {
         return;
       }
@@ -1897,6 +1949,7 @@ export class RefinerySimulation {
           unit.alertDetail = null;
         }
         unit.alert = null;
+
       }
 
       if (unit.alertTimer > 0) {
@@ -2243,4 +2296,5 @@ export class RefinerySimulation {
     this.setAllUnitsOffline(false, { emergencyOnly: true, quiet: true });
     this.pushLog("info", "Emergency shutdown cleared; restart crews may warm up units.");
   }
+
 }
