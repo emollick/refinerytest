@@ -3,7 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>SimRefinery Desk - Three.js prototype</title>
+
+    <title>SimRefinery Desk - Tile prototype</title>
+
     <link rel="stylesheet" href="styles.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -25,6 +27,10 @@
             <label class="menu-entry file-entry" data-action="session-import" for="session-import-input"
               >Import Snapshot…<input type="file" id="session-import-input" accept="application/json" hidden /></label
             >
+
+            <button type="button" class="menu-entry" data-action="session-load-old">Load Old…</button>
+            <button type="button" class="menu-entry" data-action="session-load-new">Load New…</button>
+
             <div class="menu-separator" role="separator"></div>
             <button type="button" class="menu-entry" data-action="session-speed-slower">Slow Down Time</button>
             <button type="button" class="menu-entry" data-action="session-speed-normal">Normal Time</button>
@@ -88,6 +94,49 @@
               <button type="button" class="toolbar-button" data-scenario="summerRush">SUMMER</button>
               <button type="button" class="toolbar-button" data-scenario="winterDiesel">WINTER</button>
               <button type="button" class="toolbar-button" data-scenario="quakeDrill">QUAKE</button>
+              <div class="toolbar-divider" role="separator"></div>
+              <button
+                type="button"
+                class="toolbar-button"
+                data-command="record-demo"
+                title="Whiteboard recorder placeholder"
+              >
+                RECORD
+              </button>
+              <button
+                type="button"
+                class="toolbar-button"
+                data-command="inspection"
+                title="Chevron inspection hardhat placeholder"
+              >
+                INSPECT
+              </button>
+              <div class="toolbar-divider" role="separator"></div>
+              <button
+                type="button"
+                class="toolbar-button ghost"
+                data-command="build-road"
+                title="Prototype Edit tool from the Tour Book"
+              >
+                ROAD*
+              </button>
+              <button
+                type="button"
+                class="toolbar-button ghost"
+                data-command="build-pipe"
+                title="Pipelines act like SimCity power lines — still conceptual"
+              >
+                PIPE*
+              </button>
+              <button
+                type="button"
+                class="toolbar-button ghost"
+                data-command="bulldoze"
+                title="Placeholder bulldozer tool"
+              >
+                BULLDOZE*
+              </button>
+
             </div>
             <div class="map-area">
               <div id="map-viewport" aria-hidden="false">
@@ -95,7 +144,11 @@
               </div>
               <section class="map-status" aria-live="polite" aria-label="Unit quick status overview">
                 <h3>Unit Pulse</h3>
+
+                <div id="alert-callouts" class="alert-callouts" aria-live="polite"></div>
                 <ul id="unit-pulse"></ul>
+                <div id="prototype-notes" class="prototype-notes" aria-live="polite"></div>
+
               </section>
             </div>
           </div>
@@ -251,19 +304,33 @@
         <header class="window-title">Operator Notes</header>
         <div class="window-body">
           <p>
-            This interactive homage reimagines the 1992 SimRefinery console with a three.js map and retro
-            controls. Adjust levers, explore process flow, and watch how refinery choices ripple across the
-            plant while dashboards grade your performance.
+            This rebuild leans into the tile-based look of the surviving screenshots — a SimCity/SimFarm style
+            refinery where everything is made from diamonds and tiny rectangles. The Map and Edit windows mirror
+            the Whiteboard interface Maxis Business Simulations delivered to Chevron, right down to the unfinished
+            tools that hinted at future expansion.
           </p>
           <ul class="notes-list">
-            <li>Click any process unit to inspect throughput, utilization, and incident history.</li>
-            <li>Shift-drag or use the right mouse button to pan the map; scroll the mouse wheel to zoom.</li>
-            <li>Monitor the hovering gauges and alerts—yellow indicates strain, red marks critical incidents.</li>
             <li>
-              Stage barrels in the Supply &amp; Logistics board to clear marine orders and keep an eye on the shift directives to
-              earn bonus performance.
+              Buttons marked with an asterisk are deliberate placeholders. In 1992 they advertised possible editing
+              features; here they log a message just as the Tour Book described.
             </li>
-            <li>The Operations Grade panel blends profit, reliability, emissions, and delivery discipline into a running score.</li>
+            <li>
+              Use the <strong>Record</strong> and <strong>Inspect</strong> buttons to trigger the tutorial and inspection callouts that
+              trainers relied on when showing the prototype.
+            </li>
+            <li>
+              External events — hot oil fires, lightning, and abrasive dust clouds — continue to loop to emphasise
+              how a misstep in one unit affects the whole plant.
+            </li>
+            <li>
+              Session → Load Old/New stay intentionally abstract, nodding to the mysterious menu options captured in
+              the original build.
+            </li>
+            <li>
+              Dashboards still surface throughput, logistics, and directives so you can experiment with cause and effect
+              across the refinery without needing a chemical engineering degree.
+            </li>
+
           </ul>
         </div>
       </section>

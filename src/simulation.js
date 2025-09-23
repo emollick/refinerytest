@@ -68,6 +68,9 @@ export class RefinerySimulation {
     this.performanceHistory = [];
 
     this.storage = this._initStorage();
+
+    this.storageAlertCache = this._createStorageAlertCache();
+
     this.shipments = [];
     this.shipmentStats = { total: 0, onTime: 0, missed: 0 };
     this.nextShipmentIn = 2.5;
@@ -346,6 +349,9 @@ export class RefinerySimulation {
       toExport: 0,
     };
     this.storage = this._initStorage();
+
+    this.storageAlertCache = this._createStorageAlertCache();
+
     this.shipments = [];
     this.shipmentStats = { total: 0, onTime: 0, missed: 0 };
     this.nextShipmentIn = 2.5;
@@ -578,7 +584,6 @@ export class RefinerySimulation {
     result.hydrogen += hydroFeed * 0.04;
     result.waste += hydroLoss;
 
-
     const alkylationState = this._resolveUnitState("alkylation");
     const alkylation = alkylationState.unit;
     const alkCapacity =
@@ -661,6 +666,7 @@ export class RefinerySimulation {
       hours,
       production: result,
       prices: { gasoline: gasolinePrice, diesel: dieselPrice, jet: jetPrice },
+
     });
 
     const penalty = incidentsRisk.incidentPenalty + logisticsReport.penalty;
@@ -717,7 +723,11 @@ export class RefinerySimulation {
         unit.status = "online";
         unit.integrity = 0.65 + Math.random() * 0.25;
         unit.alert = null;
-        unit.alertTimer = 6;
+
+        if (unit.alertDetail && unit.alertDetail.kind !== "incident") {
+          unit.alertDetail = null;
+        }
+
         this.pushLog("info", `${unit.name} cleared maintenance and is back online.`, {
           unitId: unit.id,
         });
@@ -787,7 +797,6 @@ export class RefinerySimulation {
     }
   }
 
-
   _updateReliability(units, context) {
     const maintenance = this.params.maintenance;
     const safety = this.params.safety;
@@ -836,13 +845,11 @@ export class RefinerySimulation {
           });
           const message = `${unit.name} tripped offline after a ${
             severity === "danger" ? "critical" : "process"
-          } upset (${cause}).`;
-          this.pushLog(
-            severity,
-            message,
 
-            { unitId: unit.id }
-          );
+          } upset (${cause.detail}).`;
+          const guidanceNote = cause.guidance ? ` ${cause.guidance}` : "";
+          this.pushLog(severity, `${message}${guidanceNote}`, { unitId: unit.id });
+
           if (severity === "danger") {
             this.pushLog(
               "danger",
@@ -854,8 +861,12 @@ export class RefinerySimulation {
           unit.alertTimer = Math.max(unit.alertTimer, severity === "danger" ? 180 : 90);
 
           unit.alertDetail = {
+            kind: "incident",
             severity,
-            cause,
+            summary: cause.summary,
+            cause: cause.detail,
+            guidance: cause.guidance,
+
             recordedAt: this._formatTime(),
             integrity: unit.integrity,
             overload,
@@ -882,15 +893,22 @@ export class RefinerySimulation {
 
   _describeIncidentCause(details) {
     const reasons = [];
+
+    const summaryHints = [];
     if (details.overload > 0.25) {
       reasons.push("overpressure from aggressive throughput");
+      summaryHints.push("Overpressure event");
     } else if (details.overload > 0.12) {
       reasons.push("running above nameplate capacity");
+      summaryHints.push("Running hot");
     }
     if (details.integrity < 0.18) {
       reasons.push("equipment fatigue from deferred maintenance");
+      summaryHints.push("Severe equipment fatigue");
     } else if (details.integrity < 0.3) {
       reasons.push("aging hardware under stress");
+      summaryHints.push("Integrity stress");
+
     }
     if (details.maintenance < 0.45) {
       reasons.push("maintenance backlog");
@@ -903,15 +921,44 @@ export class RefinerySimulation {
     }
     if (!reasons.length) {
       reasons.push("process variability");
+
+      summaryHints.push("Process instability");
     }
+
+    let detail;
     if (reasons.length === 1) {
-      return reasons[0];
+      detail = reasons[0];
+    } else if (reasons.length === 2) {
+      detail = `${reasons[0]} and ${reasons[1]}`;
+    } else {
+      const last = reasons.pop();
+      detail = `${reasons.join(", ")}, and ${last}`;
     }
-    if (reasons.length === 2) {
-      return `${reasons[0]} and ${reasons[1]}`;
+
+    const summary = summaryHints.length ? summaryHints[0] : "Process instability";
+
+    const guidanceParts = [];
+    if (details.overload > 0.12) {
+      guidanceParts.push("Trim throughput to relieve unit pressure.");
     }
-    const last = reasons.pop();
-    return `${reasons.join(", ")}, and ${last}`;
+    if (details.integrity < 0.3) {
+      guidanceParts.push("Plan downtime to restore fatigued hardware.");
+    }
+    if (details.maintenance < 0.5) {
+      guidanceParts.push("Increase maintenance coverage to rebuild integrity.");
+    }
+    if (details.safety < 0.4) {
+      guidanceParts.push("Raise safety staffing for faster response.");
+    }
+    if (!guidanceParts.length) {
+      guidanceParts.push("Hold rates steady while monitoring recovery.");
+    }
+
+    return {
+      detail,
+      summary,
+      guidance: guidanceParts.join(" "),
+    };
   }
 
 
@@ -1095,6 +1142,25 @@ export class RefinerySimulation {
     };
   }
 
+
+  _createStorageAlertCache() {
+    const products = ["gasoline", "diesel", "jet"];
+    const cache = {};
+    products.forEach((product) => {
+      cache[product] = {
+        highActive: false,
+        lowActive: false,
+        highSeverity: "warning",
+        lowSeverity: "warning",
+        highTime: "",
+        lowTime: "",
+        latestRatio: 0,
+      };
+    });
+    return cache;
+  }
+
+
   _countPendingShipments() {
     return this.shipments.filter((shipment) => shipment.status === "pending").length;
   }
@@ -1103,8 +1169,22 @@ export class RefinerySimulation {
     const productPool = ["gasoline", "gasoline", "diesel", "diesel", "jet"];
     const product = productPool[Math.floor(Math.random() * productPool.length)];
     const base = product === "jet" ? 46 : product === "diesel" ? 54 : 60;
-    const volume = Math.round(randomRange(base * 0.75, base * 1.35));
-    const window = randomRange(4, 7.5);
+
+    const capacityTotal =
+      this.storage.capacity.gasoline +
+      this.storage.capacity.diesel +
+      this.storage.capacity.jet;
+    const levelTotal =
+      this.storage.levels.gasoline +
+      this.storage.levels.diesel +
+      this.storage.levels.jet;
+    const utilization = capacityTotal ? clamp(levelTotal / capacityTotal, 0, 1) : 0;
+    const urgency = utilization > 0.92 ? 0.6 : utilization > 0.82 ? 0.3 : 0;
+    const volumeMultiplier = 1 + urgency * 0.4;
+    const windowScale = Math.max(0.55, 1 - urgency * 0.5);
+    const volume = Math.round(randomRange(base * 0.75, base * 1.35) * volumeMultiplier);
+    const window = Math.max(2.5, randomRange(4, 7.5) * windowScale);
+
     const shipment = {
       id: `ship-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
       product,
@@ -1165,7 +1245,9 @@ export class RefinerySimulation {
   }
 
   _updateLogistics(context) {
-    const { production, hours, prices } = context;
+
+    const { production, hours, prices, scenario } = context;
+
     const produced = {
       gasoline: Math.max(0, production.gasoline * hours),
       diesel: Math.max(0, production.diesel * hours),
@@ -1177,7 +1259,42 @@ export class RefinerySimulation {
       this.storage.levels[product] = clamp(this.storage.levels[product] + volume, 0, capacity);
     });
 
+
+    const demandDraw = this._calculateMarketDemand(hours, scenario);
+    const demandShortages = [];
+    Object.entries(demandDraw).forEach(([product, draw]) => {
+      const capacity = this.storage.capacity[product];
+      const available = this.storage.levels[product];
+      if (draw <= 0) {
+        return;
+      }
+      const consumed = Math.min(draw, available);
+      this.storage.levels[product] = clamp(available - consumed, 0, capacity);
+      if (draw > consumed) {
+        const shortage = draw - consumed;
+        demandShortages.push({ product, shortage });
+      }
+    });
+
     this.nextShipmentIn -= hours;
+
+    let maxRatio = 0;
+    Object.keys(this.storage.levels).forEach((product) => {
+      const capacity = this.storage.capacity[product] || 0;
+      const level = this.storage.levels[product] || 0;
+      const ratio = capacity ? clamp(level / capacity, 0, 1.2) : 0;
+      maxRatio = Math.max(maxRatio, ratio);
+      this._updateStorageAlert(product, ratio);
+    });
+
+    if (maxRatio > 0.82) {
+      this.nextShipmentIn -= hours * (1 + (maxRatio - 0.82) * 6);
+      if (maxRatio > 0.95) {
+        this.nextShipmentIn = Math.min(this.nextShipmentIn, 0.75);
+      }
+    }
+
+
     if (this._countPendingShipments() < 3 && this.nextShipmentIn <= 0) {
       this._scheduleShipment();
       this.nextShipmentIn = randomRange(2.5, 5.5);
@@ -1187,7 +1304,18 @@ export class RefinerySimulation {
       delivered: { gasoline: 0, diesel: 0, jet: 0 },
       failed: 0,
       penalty: 0,
+
+      demandShortage: 0,
     };
+
+    if (demandShortages.length) {
+      demandShortages.forEach(({ product, shortage }) => {
+        const price = prices?.[product] || 82;
+        report.demandShortage += shortage;
+        report.penalty += shortage * price * 0.35;
+      });
+    }
+
 
     this.shipments.forEach((shipment) => {
       if (shipment.status === "pending") {
@@ -1226,6 +1354,104 @@ export class RefinerySimulation {
 
     return report;
   }
+
+
+  _calculateMarketDemand(hours, scenario) {
+    const baseDemand = { gasoline: 58, diesel: 46, jet: 34 };
+    const focus = clamp(this.params.productFocus, 0, 1);
+    const focusShift = focus - 0.5;
+    const reliability = clamp(this.metrics.reliability ?? 1, 0.4, 1.2);
+    const score = typeof this.metrics.score === "number" ? this.metrics.score : 0;
+    const gradeFactor = clamp(1 + score / 260, 0.75, 1.25);
+    const demand = {
+      gasoline:
+        baseDemand.gasoline *
+        (1 + (scenario?.gasolineBias || 0) * 0.9) *
+        (1 + focusShift * 0.55),
+      diesel:
+        baseDemand.diesel *
+        (1 + (scenario?.dieselBias || 0) * 0.9) *
+        (1 - focusShift * 0.45),
+      jet:
+        baseDemand.jet *
+        (1 + (scenario?.jetBias || 0) * 1.1) *
+        (1 - Math.abs(focusShift) * 0.25),
+    };
+
+    const stability = 0.78 + reliability * 0.32;
+    const adjusted = {};
+    Object.entries(demand).forEach(([product, perDay]) => {
+      const scaled = clamp(perDay * stability * gradeFactor, 0, perDay * 1.6);
+      adjusted[product] = (scaled / HOURS_PER_DAY) * hours;
+    });
+    return adjusted;
+  }
+
+  _updateStorageAlert(product, ratio) {
+    if (!this.storageAlertCache || !this.storageAlertCache[product]) {
+      return;
+    }
+    const cache = this.storageAlertCache[product];
+    cache.latestRatio = ratio * 100;
+    const label = this._formatProductLabel(product);
+
+    if (ratio >= 0.92) {
+      const severity = ratio > 0.98 ? "danger" : "warning";
+      if (!cache.highActive || cache.highSeverity !== severity) {
+        cache.highActive = true;
+        cache.highSeverity = severity;
+        cache.highTime = this._formatTime();
+        const message =
+          severity === "danger"
+            ? `${label} tank farm is overflowing at ${Math.round(ratio * 100)}% capacity.`
+            : `${label} tanks at ${Math.round(ratio * 100)}% capacity.`;
+        this.pushLog(
+          severity === "danger" ? "danger" : "warning",
+          `${message} Expedite shipments or cut crude charge.`,
+          { product }
+        );
+      }
+    } else if (cache.highActive && ratio <= 0.86) {
+      cache.highActive = false;
+      cache.highSeverity = "warning";
+      cache.highTime = "";
+      this.pushLog("info", `${label} storage relieved below 86%.`, { product });
+    }
+
+    if (ratio <= 0.14) {
+      const severity = ratio < 0.07 ? "danger" : "warning";
+      if (!cache.lowActive || cache.lowSeverity !== severity) {
+        cache.lowActive = true;
+        cache.lowSeverity = severity;
+        cache.lowTime = this._formatTime();
+        const message =
+          severity === "danger"
+            ? `${label} tanks nearly drained (${Math.round(ratio * 100)}%).`
+            : `${label} storage running thin at ${Math.round(ratio * 100)}%.`;
+        this.pushLog(
+          severity === "danger" ? "danger" : "warning",
+          `${message} Increase production or redirect supply.`,
+          { product }
+        );
+      }
+    } else if (cache.lowActive && ratio >= 0.2) {
+      cache.lowActive = false;
+      cache.lowSeverity = "warning";
+      cache.lowTime = "";
+      this.pushLog("info", `${label} storage recovered above 20%.`, { product });
+    }
+  }
+
+  _formatProductLabel(product) {
+    const label = PRODUCT_LABELS[product] || product;
+    return label
+      .split(" ")
+      .map((segment) =>
+        segment.length ? segment.charAt(0).toUpperCase() + segment.slice(1) : segment
+      )
+      .join(" ");
+  }
+
 
   _seedDirectives() {
     while (this.directives.length < 3) {
@@ -1406,12 +1632,26 @@ export class RefinerySimulation {
 
   _updateAlerts(deltaMinutes) {
     this.units.forEach((unit) => {
+
+      if (!unit) {
+        return;
+      }
       if (unit.status === "offline") {
-        unit.alert = unit.alert === "danger" ? "danger" : "warning";
-        unit.alertTimer = Math.max(unit.alertTimer, 45);
-      } else if (unit.integrity < 0.45) {
-        unit.alert = unit.alert === "danger" ? "danger" : "warning";
-        unit.alertTimer = Math.max(unit.alertTimer, 30);
+        const severity = unit.alert === "danger" ? "danger" : "warning";
+        unit.alert = severity;
+        this._ensureOfflineAlertDetail(unit, severity);
+        unit.alertTimer = Math.max(unit.alertTimer, severity === "danger" ? 180 : 90);
+      } else if (unit.status === "online" && unit.integrity < 0.45) {
+        const severity = unit.integrity < 0.28 ? "danger" : "warning";
+        unit.alert = severity;
+        this._ensureIntegrityAlertDetail(unit, severity);
+        unit.alertTimer = Math.max(unit.alertTimer, severity === "danger" ? 60 : 30);
+      } else if (unit.alert && unit.status === "online" && unit.integrity >= 0.6) {
+        if (unit.alertDetail && unit.alertDetail.kind !== "incident") {
+          unit.alertDetail = null;
+        }
+        unit.alert = null;
+
       }
 
       if (unit.alertTimer > 0) {
@@ -1419,16 +1659,87 @@ export class RefinerySimulation {
         if (
           unit.alertTimer === 0 &&
           unit.status === "online" &&
-          unit.integrity >= 0.5 &&
+
+          unit.integrity >= 0.6 &&
           unit.alert !== "danger"
         ) {
+          if (unit.alertDetail && unit.alertDetail.kind !== "incident") {
+            unit.alertDetail = null;
+          }
           unit.alert = null;
         }
-      } else if (unit.alert && unit.status === "online" && unit.integrity >= 0.6) {
-        unit.alert = null;
       }
     });
   }
+
+  _ensureOfflineAlertDetail(unit, severity) {
+    if (unit.alertDetail && unit.alertDetail.kind === "incident") {
+      return;
+    }
+    const summary = unit.emergencyOffline
+      ? "Emergency shutdown"
+      : unit.manualOffline
+      ? "Manual standby"
+      : "Offline for repairs";
+    const cause = unit.emergencyOffline
+      ? "Emergency stop engaged; crews are stabilizing conditions."
+      : unit.manualOffline
+      ? "Operators have parked the unit in standby."
+      : "Maintenance crews are restoring the unit to service.";
+    const guidance = unit.emergencyOffline
+      ? "Investigate alarms and release the hold once the area is safe."
+      : unit.manualOffline
+      ? "Resume operations when downstream demand requires it."
+      : "Increase maintenance resources to hasten repairs.";
+
+    if (!unit.alertDetail || unit.alertDetail.kind !== "offline") {
+      unit.alertDetail = {
+        kind: "offline",
+        severity,
+        summary,
+        cause,
+        guidance,
+        recordedAt: this._formatTime(),
+      };
+    } else {
+      unit.alertDetail.severity = severity;
+      unit.alertDetail.summary = summary;
+      unit.alertDetail.cause = cause;
+      unit.alertDetail.guidance = guidance;
+    }
+  }
+
+  _ensureIntegrityAlertDetail(unit, severity) {
+    if (unit.alertDetail && unit.alertDetail.kind === "incident") {
+      return;
+    }
+    const integrityPercent = Math.round((unit.integrity ?? 0) * 100);
+    const summary = severity === "danger" ? "Integrity critical" : "Integrity low";
+    const cause = `Integrity at ${integrityPercent}%.`;
+    const guidance =
+      severity === "danger"
+        ? "Cut feed immediately and dispatch maintenance crews."
+        : "Ease throughput and increase maintenance to recover.";
+
+    if (!unit.alertDetail || unit.alertDetail.kind !== "integrity") {
+      unit.alertDetail = {
+        kind: "integrity",
+        severity,
+        summary,
+        cause,
+        guidance,
+        integrity: unit.integrity,
+        recordedAt: this._formatTime(),
+      };
+    } else {
+      unit.alertDetail.severity = severity;
+      unit.alertDetail.summary = summary;
+      unit.alertDetail.cause = cause;
+      unit.alertDetail.guidance = guidance;
+      unit.alertDetail.integrity = unit.integrity;
+    }
+  }
+
 
   getLogisticsState() {
     return {
@@ -1438,7 +1749,91 @@ export class RefinerySimulation {
       },
       shipments: this.shipments.map((shipment) => ({ ...shipment })),
       stats: { ...this.shipmentStats },
+
+      alerts: this.getStorageAlerts(),
     };
+  }
+
+  getStorageAlerts() {
+    const alerts = [];
+    if (!this.storageAlertCache) {
+      return alerts;
+    }
+    Object.entries(this.storageAlertCache).forEach(([product, cache]) => {
+      const capacity = this.storage.capacity[product] || 0;
+      const level = this.storage.levels[product] || 0;
+      const ratio = capacity ? clamp(level / capacity, 0, 1.2) : 0;
+      const label = this._formatProductLabel(product);
+      if (cache.highActive) {
+        alerts.push({
+          type: "storage",
+          product,
+          label,
+          severity: cache.highSeverity || "warning",
+          summary: cache.highSeverity === "danger" ? "Tanks critical" : "Tanks near capacity",
+          detail: `${label} storage at ${Math.round(ratio * 100)}% (${level.toFixed(0)} / ${capacity.toFixed(0)} kb).`,
+          guidance: "Schedule exports or trim crude rates to relieve pressure.",
+          recordedAt: cache.highTime,
+          percent: ratio * 100,
+        });
+      }
+      if (cache.lowActive) {
+        alerts.push({
+          type: "storage",
+          product,
+          label,
+          severity: cache.lowSeverity || "warning",
+          summary: cache.lowSeverity === "danger" ? "Tanks nearly empty" : "Tanks running low",
+          detail: `${label} tanks at ${Math.round(ratio * 100)}% (${level.toFixed(0)} / ${capacity.toFixed(0)} kb).`,
+          guidance: "Boost production or delay shipments until inventory recovers.",
+          recordedAt: cache.lowTime,
+          percent: ratio * 100,
+        });
+      }
+    });
+    return alerts;
+  }
+
+  getActiveAlerts() {
+    const alerts = [];
+    this.units.forEach((unit) => {
+      if (!unit.alert) {
+        return;
+      }
+      const detail = unit.alertDetail || unit.lastIncident || {};
+      const summary = detail.summary
+        || (unit.status === "offline"
+          ? unit.emergencyOffline
+            ? "Emergency shutdown"
+            : "Offline for repairs"
+          : unit.alert === "danger"
+          ? "Critical fault"
+          : unit.alert === "warning"
+          ? `Integrity ${Math.round((unit.integrity ?? 0) * 100)}%`
+          : "Process warning");
+      const detailText = detail.cause
+        || (unit.alert === "warning" && typeof unit.integrity === "number"
+          ? `Integrity at ${Math.round(unit.integrity * 100)}%.`
+          : "");
+      const guidance = detail.guidance
+        || (unit.alert === "danger"
+          ? "Dispatch crews and stabilize the unit immediately."
+          : unit.alert === "warning"
+          ? "Increase maintenance or trim feed to recover stability."
+          : "");
+      alerts.push({
+        type: "unit",
+        unitId: unit.id,
+        label: unit.name,
+        name: unit.name,
+        severity: detail.severity || unit.alert,
+        summary,
+        detail: detailText,
+        guidance,
+        recordedAt: detail.recordedAt || "",
+      });
+    });
+    return alerts.concat(this.getStorageAlerts());
   }
 
   getDirectives() {

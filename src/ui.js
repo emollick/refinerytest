@@ -780,13 +780,27 @@ export class UIController {
     alertBox.classList.add("unit-incident");
     alertBox.classList.add(detail.severity === "danger" ? "danger" : "warning");
     const title = document.createElement("strong");
-    title.textContent = detail.severity === "danger" ? "Critical incident" : "Process upset";
+
+    title.textContent = detail.summary
+      ? detail.summary
+      : detail.severity === "danger"
+      ? "Critical incident"
+      : "Process upset";
+
     alertBox.appendChild(title);
     if (detail.cause) {
       const cause = document.createElement("p");
       cause.textContent = detail.cause;
       alertBox.appendChild(cause);
     }
+
+    if (detail.guidance) {
+      const guidance = document.createElement("p");
+      guidance.classList.add("unit-incident-guidance");
+      guidance.textContent = detail.guidance;
+      alertBox.appendChild(guidance);
+    }
+
     if (unit.status === "offline" && unit.downtime > 0) {
       const eta = document.createElement("span");
       eta.classList.add("unit-incident-eta");
