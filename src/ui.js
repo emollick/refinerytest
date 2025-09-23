@@ -1,3 +1,4 @@
+
 const PRODUCT_LABELS = {
   gasoline: "Gasoline",
   diesel: "Diesel",
@@ -10,6 +11,7 @@ export class UIController {
     this.selectedUnitId = null;
     this.lastLogSignature = "";
     this.modeFlashTimeout = null;
+
     this.processTopology =
       typeof simulation.getProcessTopology === "function" ? simulation.getProcessTopology() : {};
     this.latestFlows = {};
@@ -35,10 +37,12 @@ export class UIController {
       jetOutput: document.getElementById("jet-output"),
       lpgOutput: document.getElementById("lpg-output"),
       profitOutput: document.getElementById("profit-output"),
+
       revenueOutput: document.getElementById("revenue-output"),
       expenseOutput: document.getElementById("expense-output"),
       penaltyOutput: document.getElementById("penalty-output"),
       marginOutput: document.getElementById("margin-output"),
+
       reliabilityOutput: document.getElementById("reliability-output"),
       carbonOutput: document.getElementById("carbon-output"),
       scoreGrade: document.getElementById("score-grade"),
@@ -58,6 +62,7 @@ export class UIController {
       shipmentList: document.getElementById("shipment-list"),
       shipmentReliability: document.getElementById("shipment-reliability"),
       directiveList: document.getElementById("directive-list"),
+
     };
 
     this.profitFormatter = new Intl.NumberFormat("en-US", {
@@ -65,7 +70,9 @@ export class UIController {
       currency: "USD",
       maximumFractionDigits: 0,
     });
+
     this.flowFormatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
+
 
     this._bindControls();
     this._populateScenarios();
@@ -207,6 +214,7 @@ export class UIController {
 
     const status = document.createElement("p");
     status.textContent = this._describeUnitStatus(unit);
+
     status.classList.add("unit-status");
     unitDetails.appendChild(status);
 
@@ -224,6 +232,7 @@ export class UIController {
     this._renderUnitControls(unitDetails, unit, overrideState);
     this._renderAlertDetail(unitDetails, unit);
     this._renderProcessTopology(unitDetails, unit);
+
   }
 
   _statRow(label, value) {
@@ -237,12 +246,14 @@ export class UIController {
     return wrapper;
   }
 
+
   update(logisticsState, flows = null) {
     if (flows) {
       this.latestFlows = { ...flows };
     } else {
       this.latestFlows = this.simulation.getFlows();
     }
+
     const metrics = this.simulation.getMetrics();
     this._renderMetrics(metrics);
     this._renderLogs();
@@ -256,6 +267,7 @@ export class UIController {
     const logistics = logisticsState || this.simulation.getLogisticsState();
     this._renderLogistics(logistics);
     this._renderDirectives(this.simulation.getDirectives());
+
   }
 
   refreshControls() {
@@ -296,6 +308,7 @@ export class UIController {
       Math.round(metrics.profitPerHour * 1000)
     )} / hr`;
 
+
     if (this.elements.revenueOutput) {
       const revenue = typeof metrics.revenuePerDay === "number" ? metrics.revenuePerDay : 0;
       this.elements.revenueOutput.textContent = `${this.profitFormatter.format(
@@ -321,6 +334,7 @@ export class UIController {
       const margin = typeof metrics.marginMultiplier === "number" ? metrics.marginMultiplier : 0;
       this.elements.marginOutput.textContent = `${Math.round(margin * 100)}%`;
     }
+
 
     this.elements.reliabilityOutput.textContent = `${Math.round(metrics.reliability * 100)}%`;
     this.elements.carbonOutput.textContent = `${metrics.carbon.toFixed(1)} tCO₂-eq`;
@@ -799,23 +813,27 @@ export class UIController {
     alertBox.classList.add("unit-incident");
     alertBox.classList.add(detail.severity === "danger" ? "danger" : "warning");
     const title = document.createElement("strong");
+
     title.textContent = detail.summary
       ? detail.summary
       : detail.severity === "danger"
       ? "Critical incident"
       : "Process upset";
+
     alertBox.appendChild(title);
     if (detail.cause) {
       const cause = document.createElement("p");
       cause.textContent = detail.cause;
       alertBox.appendChild(cause);
     }
+
     if (detail.guidance) {
       const guidance = document.createElement("p");
       guidance.classList.add("unit-incident-guidance");
       guidance.textContent = detail.guidance;
       alertBox.appendChild(guidance);
     }
+
     if (unit.status === "offline" && unit.downtime > 0) {
       const eta = document.createElement("span");
       eta.classList.add("unit-incident-eta");
@@ -901,6 +919,7 @@ export class UIController {
     const minutes = Math.max(1, Math.ceil(unit.downtime || 0));
     return `Offline (${minutes} min remaining)`;
   }
+
 
   _formatHours(hours) {
     if (!Number.isFinite(hours)) {
