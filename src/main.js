@@ -878,7 +878,6 @@ const PRESETS = {
     label: "SHUTDN",
     crude: 0,
     focus: 0.5,
-
     maintenance: 0.82,
     safety: 0.72,
     environment: 0.55,
