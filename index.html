@@ -3,7 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+
     <title>SimRefinery Desk - Tile prototype</title>
+
     <link rel="stylesheet" href="styles.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -25,8 +27,10 @@
             <label class="menu-entry file-entry" data-action="session-import" for="session-import-input"
               >Import Snapshot…<input type="file" id="session-import-input" accept="application/json" hidden /></label
             >
+
             <button type="button" class="menu-entry" data-action="session-load-old">Load Old…</button>
             <button type="button" class="menu-entry" data-action="session-load-new">Load New…</button>
+
             <div class="menu-separator" role="separator"></div>
             <button type="button" class="menu-entry" data-action="session-speed-slower">Slow Down Time</button>
             <button type="button" class="menu-entry" data-action="session-speed-normal">Normal Time</button>
@@ -132,6 +136,7 @@
               >
                 BULLDOZE*
               </button>
+
             </div>
             <div class="map-area">
               <div id="map-viewport" aria-hidden="false">
@@ -139,9 +144,11 @@
               </div>
               <section class="map-status" aria-live="polite" aria-label="Unit quick status overview">
                 <h3>Unit Pulse</h3>
+
                 <div id="alert-callouts" class="alert-callouts" aria-live="polite"></div>
                 <ul id="unit-pulse"></ul>
                 <div id="prototype-notes" class="prototype-notes" aria-live="polite"></div>
+
               </section>
             </div>
           </div>
@@ -323,6 +330,7 @@
               Dashboards still surface throughput, logistics, and directives so you can experiment with cause and effect
               across the refinery without needing a chemical engineering degree.
             </li>
+
           </ul>
         </div>
       </section>

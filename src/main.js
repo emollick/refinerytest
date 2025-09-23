@@ -1,3 +1,4 @@
+
 import { RefinerySimulation } from "./simulation.js";
 import { UIController } from "./ui.js";
 
@@ -11,6 +12,7 @@ const scenarioMenu = document.getElementById("scenario-menu");
 const unitMenu = document.getElementById("unit-menu");
 const importInput = document.getElementById("session-import-input");
 const unitPulseList = document.getElementById("unit-pulse");
+
 const mapToolbar = document.querySelector(".map-toolbar");
 const prototypeNotes = document.getElementById("prototype-notes");
 const gridToggleButton = menuBar?.querySelector('[data-action="view-toggle-grid"]');
@@ -25,6 +27,8 @@ sceneContainer.appendChild(canvas);
 const context = canvas.getContext("2d");
 context.imageSmoothingEnabled = false;
 
+
+
 const simulation = new RefinerySimulation();
 const ui = new UIController(simulation);
 if (typeof ui.setModeBadge === "function") {
@@ -32,7 +36,9 @@ if (typeof ui.setModeBadge === "function") {
 }
 
 const processTopology = simulation.getProcessTopology?.() || {};
+
 const unitConnectionIndex = buildUnitConnectionIndex(processTopology);
+
 
 const unitConfigs = [
   {
@@ -851,6 +857,7 @@ let lastPulseRefresh = 0;
 let gridVisible = true;
 let flowOverlayVisible = true;
 let activeMenu = null;
+
 const PRESETS = {
   auto: {
     label: "AUTO",
@@ -874,6 +881,7 @@ const PRESETS = {
     label: "SHUTDN",
     crude: 0,
     focus: 0.5,
+
     maintenance: 0.82,
     safety: 0.72,
     environment: 0.55,
@@ -1015,6 +1023,7 @@ function animate(now) {
   requestAnimationFrame(animate);
 }
 requestAnimationFrame(animate);
+
 function applyPreset(name, options = {}) {
   const preset = PRESETS[name];
   if (!preset) {
@@ -1184,6 +1193,7 @@ function handleMenuAction(action) {
       simulation.pushLog("info", `Time scale increased to ${multiplier.toFixed(2)}× baseline.`);
       break;
     }
+
     case "session-load-old":
       simulation.pushLog(
         "info",
@@ -1199,6 +1209,7 @@ function handleMenuAction(action) {
     case "view-center":
       renderer.resetView();
       simulation.pushLog("info", "Viewport recentered over refinery layout.");
+
       break;
     case "view-toggle-grid": {
       const nextState = !gridVisible;
@@ -1213,8 +1224,10 @@ function handleMenuAction(action) {
       break;
     }
     case "view-cycle-light":
+
       renderer.cyclePalette();
       simulation.pushLog("info", "Palette cycled — channeling SimFarm and SimCity swatches.");
+
       break;
     default:
       break;
@@ -1229,15 +1242,19 @@ function updateToggleButton(button, visible, hideLabel, showLabel) {
 
 function setGridVisibility(visible) {
   gridVisible = visible;
+
   renderer.setGridVisible(visible);
+
   updateToggleButton(gridToggleButton, gridVisible, "Hide Grid Overlay", "Show Grid Overlay");
 }
 
 function setFlowVisibility(visible) {
   flowOverlayVisible = visible;
+
   renderer.setFlowVisible(visible);
   updateToggleButton(flowToggleButton, flowOverlayVisible, "Hide Flow Glow", "Show Flow Glow");
 }
+
 
 function performSimulationReset() {
   simulation.reset();
@@ -1306,6 +1323,7 @@ function handleSnapshotImport(event) {
   reader.readAsText(file);
   event.target.value = "";
 }
+
 function populateScenarioMenu() {
   if (!scenarioMenu) {
     return;
@@ -1345,6 +1363,7 @@ function populateUnitMenu() {
     unitMenu.appendChild(button);
   });
   updateUnitMenuActive(selectedUnitId);
+
 }
 
 function updateUnitMenuActive(unitId) {
@@ -1466,12 +1485,16 @@ function refreshUnitPulse(time, force = false) {
   simulation.getUnits().forEach((unit) => {
     const entry = unitPulseEntries.get(unit.id);
     if (!entry) return;
+
     const utilization = clamp(unit.utilization ?? 0, 0, 1.4);
+
     const normalizedLoad = Math.min(utilization, 1);
     entry.loadFill.style.width = `${(normalizedLoad * 100).toFixed(1)}%`;
     entry.loadFill.style.background = getLoadGradient(normalizedLoad, utilization > 1);
     entry.loadValue.textContent = `${Math.round(utilization * 100)}%`;
+
     const integrity = clamp(unit.integrity ?? 0, 0, 1);
+
     entry.integrityFill.style.width = `${(integrity * 100).toFixed(1)}%`;
     entry.integrityFill.style.background = getIntegrityGradient(integrity);
     entry.integrityValue.textContent = `${Math.round(integrity * 100)}%`;
@@ -1485,6 +1508,7 @@ function refreshUnitPulse(time, force = false) {
     entry.item.classList.toggle("selected", selectedUnitId === unit.id);
     entry.item.classList.toggle("alerting", Boolean(unit.alert));
   });
+
 
   renderAlertCallouts();
 }
@@ -1788,6 +1812,7 @@ function updateMenuToggle(running) {
   if (!menuToggle) return;
   menuToggle.textContent = running ? "Pause" : "Resume";
   menuToggle.setAttribute("aria-pressed", running ? "false" : "true");
+
 }
 
 function buildProcessLegend() {
@@ -1814,6 +1839,7 @@ function buildProcessLegend() {
     item.setAttribute("role", "button");
     item.tabIndex = 0;
     const name = document.createElement("span");
+
     name.textContent = entry.name || unitId;
     item.appendChild(name);
     const summary = document.createElement("small");
@@ -1835,6 +1861,7 @@ function buildProcessLegend() {
         clearPipelineHighlight();
       }
     });
+
     item.addEventListener("click", () => {
       setSelectedUnit(unitId);
       ui.selectUnit(unitId);
@@ -1846,11 +1873,13 @@ function buildProcessLegend() {
         ui.selectUnit(unitId);
       }
     });
+
     list.appendChild(item);
   });
   legend.appendChild(list);
   mapStatusPanel.appendChild(legend);
 }
+
 
 function highlightPipelinesForUnit(unitId) {
   if (!unitId) {
@@ -1946,4 +1975,5 @@ function buildUnitConnectionIndex(topology) {
   });
   return map;
 }
+
 
