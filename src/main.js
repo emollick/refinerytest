@@ -1623,15 +1623,18 @@ _fitCameraToView({ preserveZoom = false } = {}) {
     return changed;
   }
 
-  _centeredOffsets(zoom) {
-    if (!this.mapBounds) {
-      return { offsetX: this.camera.offsetX || 0, offsetY: this.camera.offsetY || 0 };
-    }
-    const offsetX = this.viewWidth / 2 - this.mapBounds.centerX * zoom;
-    const offsetY = this.viewHeight / 2 - this.mapBounds.centerY * zoom;
-    return { offsetX, offsetY };
+_centeredOffsets(zoom) {
+  if (!this.mapBounds) {
+    return { offsetX: this.camera.offsetX || 0, offsetY: this.camera.offsetY || 0 };
   }
-
+  // Use actual display dimensions, not viewBox dimensions
+  const displayCenterX = (this.displayWidth || this.viewWidth) / 2;
+  const displayCenterY = (this.displayHeight || this.viewHeight) / 2;
+  
+  const offsetX = displayCenterX / this.deviceScaleX - this.mapBounds.centerX * zoom;
+  const offsetY = displayCenterY / this.deviceScaleY - this.mapBounds.centerY * zoom;
+  return { offsetX, offsetY };
+}
 _ensureCameraVisible() {
   if (!this.mapBounds) {
     return;
