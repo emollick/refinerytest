@@ -588,7 +588,6 @@ class TileRenderer {
       [right[0], right[1] + drop],
     ];
   }
-
   _createGrid() {
     const nodes = [];
     for (let y = 0; y < this.mapRows; y += 1) {
@@ -2021,7 +2020,6 @@ initializeMenus();
 updateMenuToggle(simulation.running);
 setGridVisibility(gridVisible);
 setFlowVisibility(flowOverlayVisible);
-
 populateScenarioMenu();
 populateUnitMenu();
 buildProcessLegend();
