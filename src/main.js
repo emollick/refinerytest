@@ -312,8 +312,10 @@ class TileRenderer {
     if (!this.camera.userControlled) {
       this._fitCameraToView({ preserveZoom: true });
     } else {
-      this._clampCamera();
-      this._updateCameraTransform();
+      const clamped = this._clampCamera();
+      if (clamped) {
+        this._updateCameraTransform();
+      }
     }
   }
 
@@ -366,6 +368,7 @@ class TileRenderer {
   render(deltaSeconds, { flows, logistics }) {
     this.time += deltaSeconds;
     this._stabilizeCamera();
+    this._ensureCameraVisible();
     if (deltaSeconds > 0) {
       this.selectionFlash += deltaSeconds;
     }
@@ -1519,11 +1522,12 @@ class TileRenderer {
       const scaleY = availableHeight / Math.max(1, this.mapBounds.height);
       const targetZoom = clamp(Math.min(scaleX, scaleY), this.camera.minZoom, this.camera.maxZoom);
       this.camera.zoom = targetZoom;
+    } else {
+      this.camera.zoom = clamp(this.camera.zoom, this.camera.minZoom, this.camera.maxZoom);
     }
-    const offsetX = this.viewWidth / 2 - this.mapBounds.centerX * this.camera.zoom;
-    const offsetY = this.viewHeight / 2 - this.mapBounds.centerY * this.camera.zoom;
-    this.camera.offsetX = offsetX;
-    this.camera.offsetY = offsetY;
+    const centered = this._centeredOffsets(this.camera.zoom);
+    this.camera.offsetX = centered.offsetX;
+    this.camera.offsetY = centered.offsetY;
     this._clampCamera();
     this.camera.homeOffsetX = this.camera.offsetX;
     this.camera.homeOffsetY = this.camera.offsetY;
@@ -1539,7 +1543,7 @@ class TileRenderer {
 
   _clampCamera() {
     if (!this.mapBounds) {
-      return;
+      return false;
     }
     const { minX, maxX, minY, maxY } = this.mapBounds;
     const { zoom } = this.camera;
@@ -1568,36 +1572,86 @@ class TileRenderer {
       offsetY = (minOffsetY + maxOffsetY) / 2;
     }
 
+    const changed =
+      Math.abs(offsetX - this.camera.offsetX) > 0.001 || Math.abs(offsetY - this.camera.offsetY) > 0.001;
     this.camera.offsetX = offsetX;
     this.camera.offsetY = offsetY;
+    return changed;
   }
+
+  _centeredOffsets(zoom) {
+    if (!this.mapBounds) {
+      return { offsetX: this.camera.offsetX || 0, offsetY: this.camera.offsetY || 0 };
+    }
+    const offsetX = this.viewWidth / 2 - this.mapBounds.centerX * zoom;
+    const offsetY = this.viewHeight / 2 - this.mapBounds.centerY * zoom;
+    return { offsetX, offsetY };
+  }
+
+  _ensureCameraVisible() {
+    if (!this.mapBounds) {
+      return;
+    }
+    const { minX, maxX, minY, maxY } = this.mapBounds;
+    const { zoom, offsetX, offsetY } = this.camera;
+    const margin = 24;
+    const left = minX * zoom + offsetX;
+    const right = maxX * zoom + offsetX;
+    const top = minY * zoom + offsetY;
+    const bottom = maxY * zoom + offsetY;
+    if (
+      right < margin ||
+      left > this.viewWidth - margin ||
+      bottom < margin ||
+      top > this.viewHeight - margin
+    ) {
+      this.camera.userControlled = false;
+      this._fitCameraToView({ preserveZoom: true });
+    }
+  }
+
   _stabilizeCamera() {
     if (this.camera.userControlled) {
+      if (this._clampCamera()) {
+        this._updateCameraTransform();
+      }
       return;
     }
-    const { homeOffsetX, homeOffsetY, homeZoom } = this.camera;
-    if (
-      !Number.isFinite(homeOffsetX) ||
-      !Number.isFinite(homeOffsetY) ||
-      !Number.isFinite(homeZoom)
-    ) {
-      return;
-    }
+    const desiredZoom = Number.isFinite(this.camera.homeZoom)
+      ? clamp(this.camera.homeZoom, this.camera.minZoom, this.camera.maxZoom)
+      : clamp(this.camera.zoom, this.camera.minZoom, this.camera.maxZoom);
+    const fallbackHome = this._centeredOffsets(desiredZoom);
+    let targetOffsetX = Number.isFinite(this.camera.homeOffsetX)
+      ? this.camera.homeOffsetX
+      : fallbackHome.offsetX;
+    let targetOffsetY = Number.isFinite(this.camera.homeOffsetY)
+      ? this.camera.homeOffsetY
+      : fallbackHome.offsetY;
+
     let changed = false;
-    if (this.camera.offsetX !== homeOffsetX) {
-      this.camera.offsetX = homeOffsetX;
+    if (Math.abs(this.camera.zoom - desiredZoom) > 0.0001) {
+      this.camera.zoom = desiredZoom;
       changed = true;
     }
-    if (this.camera.offsetY !== homeOffsetY) {
-      this.camera.offsetY = homeOffsetY;
+    if (Math.abs(this.camera.offsetX - targetOffsetX) > 0.1) {
+      this.camera.offsetX = targetOffsetX;
       changed = true;
     }
-    if (this.camera.zoom !== homeZoom) {
-      this.camera.zoom = homeZoom;
+    if (Math.abs(this.camera.offsetY - targetOffsetY) > 0.1) {
+      this.camera.offsetY = targetOffsetY;
       changed = true;
     }
-    if (changed) {
-      this._clampCamera();
+
+    const clamped = this._clampCamera();
+    if (clamped) {
+      targetOffsetX = this.camera.offsetX;
+      targetOffsetY = this.camera.offsetY;
+    }
+
+    if (changed || clamped) {
+      this.camera.homeOffsetX = targetOffsetX;
+      this.camera.homeOffsetY = targetOffsetY;
+      this.camera.homeZoom = this.camera.zoom;
       this._updateCameraTransform();
     }
   }
