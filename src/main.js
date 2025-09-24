@@ -1699,10 +1699,34 @@ _stabilizeCamera() {
 }
 
 beginPan(screenX, screenY) {
+  // Stop any animation and lock current position
+  this.camera.offsetX = Math.round(this.camera.offsetX * 100) / 100;
+  this.camera.offsetY = Math.round(this.camera.offsetY * 100) / 100;
+  
+  this.panSession = {
+    startX: screenX,
+    startY: screenY,
+    baseOffsetX: this.camera.offsetX,
+    baseOffsetY: this.camera.offsetY,
+  };
+  this.camera.userControlled = true;
+}
 
-  endPan() {
-    this.panSession = null;
+panTo(screenX, screenY) {
+  if (!this.panSession) {
+    return;
   }
+  const dx = screenX - this.panSession.startX;
+  const dy = screenY - this.panSession.startY;
+  this.camera.offsetX = this.panSession.baseOffsetX + dx;
+  this.camera.offsetY = this.panSession.baseOffsetY + dy;
+  this._clampCamera();
+  this._updateCameraTransform();
+}
+
+endPan() {
+  this.panSession = null;
+}
 
   isPanning() {
     return Boolean(this.panSession);
