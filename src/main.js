@@ -333,7 +333,6 @@ resizeToContainer(container) {
   
   // Just update transform without recalculating position
   this._updateCameraTransform();
-}
   }
 
   setGridVisible(visible) {
