@@ -1727,8 +1727,7 @@ panTo(screenX, screenY) {
 endPan() {
   this.panSession = null;
 }
-
-  isPanning() {
+isPanning() {
     return Boolean(this.panSession);
   }
 
