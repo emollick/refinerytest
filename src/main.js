@@ -297,26 +297,28 @@ class TileRenderer {
     return this.svg;
   }
 
-  resizeToContainer(container) {
-    const rect = container.getBoundingClientRect();
-    const width = Math.max(720, Math.floor(rect.width));
-    const height = Math.max(480, Math.floor(rect.height));
-    this.svg.setAttribute("width", width);
-    this.svg.setAttribute("height", height);
-    this.svg.style.width = `${width}px`;
-    this.svg.style.height = `${height}px`;
-    this.deviceScaleX = this.viewWidth / width;
-    this.deviceScaleY = this.viewHeight / height;
-    this.displayWidth = width;
-    this.displayHeight = height;
-  if (!this.camera.userControlled) {
-  // Only recalculate if we don't have a home position yet
-  if (this.camera.homeZoom === 1 && this.camera.homeOffsetX === 0) {
-    this._fitCameraToView({ preserveZoom: true });
-  } else {
-    // Just update the transform without recalculating
-    this._updateCameraTransform();
+resizeToContainer(container) {
+  const rect = container.getBoundingClientRect();
+  const width = Math.max(720, Math.floor(rect.width));
+  const height = Math.max(480, Math.floor(rect.height));
+  
+  // Check if dimensions actually changed
+  if (this.displayWidth === width && this.displayHeight === height) {
+    return; // No change, don't recalculate
   }
+  
+  this.svg.setAttribute("width", width);
+  this.svg.setAttribute("height", height);
+  this.svg.style.width = `${width}px`;
+  this.svg.style.height = `${height}px`;
+  this.deviceScaleX = this.viewWidth / width;
+  this.deviceScaleY = this.viewHeight / height;
+  this.displayWidth = width;
+  this.displayHeight = height;
+  
+  // Don't recalculate camera position, just update the transform
+  this._updateCameraTransform();
+}
 } else {
   const clamped = this._clampCamera();
   if (clamped) {
