@@ -1610,51 +1610,70 @@ class TileRenderer {
     }
   }
 
-  _stabilizeCamera() {
-    if (this.camera.userControlled) {
-      if (this._clampCamera()) {
-        this._updateCameraTransform();
-      }
-      return;
-    }
-    const desiredZoom = Number.isFinite(this.camera.homeZoom)
-      ? clamp(this.camera.homeZoom, this.camera.minZoom, this.camera.maxZoom)
-      : clamp(this.camera.zoom, this.camera.minZoom, this.camera.maxZoom);
-    const fallbackHome = this._centeredOffsets(desiredZoom);
-    let targetOffsetX = Number.isFinite(this.camera.homeOffsetX)
-      ? this.camera.homeOffsetX
-      : fallbackHome.offsetX;
-    let targetOffsetY = Number.isFinite(this.camera.homeOffsetY)
-      ? this.camera.homeOffsetY
-      : fallbackHome.offsetY;
-
-    let changed = false;
-    if (Math.abs(this.camera.zoom - desiredZoom) > 0.0001) {
-      this.camera.zoom = desiredZoom;
-      changed = true;
-    }
-    if (Math.abs(this.camera.offsetX - targetOffsetX) > 0.1) {
-      this.camera.offsetX = targetOffsetX;
-      changed = true;
-    }
-    if (Math.abs(this.camera.offsetY - targetOffsetY) > 0.1) {
-      this.camera.offsetY = targetOffsetY;
-      changed = true;
-    }
-
-    const clamped = this._clampCamera();
-    if (clamped) {
-      targetOffsetX = this.camera.offsetX;
-      targetOffsetY = this.camera.offsetY;
-    }
-
-    if (changed || clamped) {
-      this.camera.homeOffsetX = targetOffsetX;
-      this.camera.homeOffsetY = targetOffsetY;
-      this.camera.homeZoom = this.camera.zoom;
+_stabilizeCamera() {
+  if (this.camera.userControlled) {
+    if (this._clampCamera()) {
       this._updateCameraTransform();
     }
+    return;
   }
+  
+  const desiredZoom = Number.isFinite(this.camera.homeZoom)
+    ? clamp(this.camera.homeZoom, this.camera.minZoom, this.camera.maxZoom)
+    : clamp(this.camera.zoom, this.camera.minZoom, this.camera.maxZoom);
+  
+  const fallbackHome = this._centeredOffsets(desiredZoom);
+  let targetOffsetX = Number.isFinite(this.camera.homeOffsetX)
+    ? this.camera.homeOffsetX
+    : fallbackHome.offsetX;
+  let targetOffsetY = Number.isFinite(this.camera.homeOffsetY)
+    ? this.camera.homeOffsetY
+    : fallbackHome.offsetY;
+
+  // Apply smoothing to prevent jitter while still reaching exact target
+  const smoothing = 0.15; // Adjust for faster/slower camera movement
+  const deltaX = targetOffsetX - this.camera.offsetX;
+  const deltaY = targetOffsetY - this.camera.offsetY;
+  const deltaZoom = desiredZoom - this.camera.zoom;
+  
+  let changed = false;
+  
+  // Snap to target if very close to prevent drift
+  if (Math.abs(deltaZoom) < 0.001) {
+    this.camera.zoom = desiredZoom;
+  } else if (Math.abs(deltaZoom) > 0.0001) {
+    this.camera.zoom += deltaZoom * smoothing;
+    changed = true;
+  }
+  
+  // Snap to exact position when close enough to prevent drift
+  if (Math.abs(deltaX) < 0.01) {
+    this.camera.offsetX = targetOffsetX;
+  } else if (Math.abs(deltaX) > 0.001) {
+    this.camera.offsetX += deltaX * smoothing;
+    changed = true;
+  }
+  
+  if (Math.abs(deltaY) < 0.01) {
+    this.camera.offsetY = targetOffsetY;
+  } else if (Math.abs(deltaY) > 0.001) {
+    this.camera.offsetY += deltaY * smoothing;
+    changed = true;
+  }
+
+  const clamped = this._clampCamera();
+  if (clamped) {
+    targetOffsetX = this.camera.offsetX;
+    targetOffsetY = this.camera.offsetY;
+  }
+
+  if (changed || clamped) {
+    this.camera.homeOffsetX = targetOffsetX;
+    this.camera.homeOffsetY = targetOffsetY;
+    this.camera.homeZoom = desiredZoom;
+    this._updateCameraTransform();
+  }
+}
 
   beginPan(screenX, screenY) {
     this.panSession = {
