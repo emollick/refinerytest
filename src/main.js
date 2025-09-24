@@ -2169,7 +2169,13 @@ if (mapToolbar) {
 }
 
 if ("ResizeObserver" in window) {
-  const resizeObserver = new ResizeObserver(() => renderer.resizeToContainer(mapViewport));
+  let resizeTimeout;
+  const resizeObserver = new ResizeObserver(() => {
+    clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(() => {
+      renderer.resizeToContainer(mapViewport);
+    }, 100);
+  });
   resizeObserver.observe(mapViewport);
 }
 window.addEventListener("resize", () => renderer.resizeToContainer(mapViewport));
