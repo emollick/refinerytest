@@ -261,7 +261,6 @@ class TileRenderer {
       "aria-hidden": "true",
     });
     this.container.appendChild(this.svg);
-
     this.worldGroup = createSvgElement("g", { class: "map-world" });
     this.svg.appendChild(this.worldGroup);
 
