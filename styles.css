@@ -324,6 +324,156 @@ body {
   filter: saturate(1.05) contrast(1.05);
 }
 
+.tile-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+
+.tile-layer {
+  pointer-events: none;
+}
+
+.tile-layer.hidden {
+  display: none;
+}
+
+.tile-layer .tile {
+  stroke: rgba(16, 24, 36, 0.5);
+  stroke-width: 1px;
+}
+
+.tile-layer.grid .grid-line {
+  fill: none;
+  stroke: rgba(20, 40, 60, 0.4);
+  stroke-width: 1px;
+  stroke-dasharray: 3 9;
+}
+
+.pipeline-base,
+.pipeline-glow {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.pipeline-base {
+  stroke-width: 6px;
+  opacity: 0.45;
+}
+
+.pipeline-glow {
+  stroke-width: 8px;
+  opacity: 0.35;
+  filter: blur(1.5px);
+  mix-blend-mode: screen;
+}
+
+.unit {
+  pointer-events: none;
+  filter: drop-shadow(0 6px 8px rgba(4, 10, 20, 0.45));
+}
+
+.unit-body {
+  stroke: rgba(12, 20, 32, 0.6);
+  stroke-width: 2px;
+}
+
+.unit-accent {
+  fill-opacity: 0.85;
+}
+
+.unit-highlight {
+  fill: none;
+  stroke: rgba(255, 244, 180, 0.45);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.unit-label {
+  font-family: "Inconsolata", monospace;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  fill: #f1f5ff;
+  text-shadow: 0 1px 0 rgba(6, 10, 18, 0.75);
+}
+
+.unit-gauges .gauge-bg {
+  fill: rgba(8, 16, 24, 0.68);
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-width: 1px;
+}
+
+.gauge-load {
+  fill: #6ed16f;
+}
+
+.gauge-health {
+  fill: #66b0ff;
+}
+
+.pointer {
+  fill: rgba(255, 255, 255, 0.2);
+  stroke: rgba(255, 255, 255, 0.5);
+  stroke-width: 2px;
+  opacity: 0;
+  transition: opacity 0.18s ease-out;
+}
+
+.pointer.visible {
+  opacity: 1;
+}
+
+.tank-base {
+  fill: rgba(120, 138, 164, 0.4);
+  stroke: rgba(24, 34, 48, 0.6);
+  stroke-width: 2px;
+}
+
+.tank-fill {
+  fill: rgba(150, 210, 255, 0.58);
+}
+
+.decor.parking {
+  fill: rgba(186, 194, 208, 0.62);
+  stroke: rgba(34, 40, 54, 0.55);
+  stroke-width: 1.5px;
+}
+
+.decor.booth {
+  fill: rgba(206, 138, 72, 0.92);
+  stroke: rgba(52, 30, 10, 0.85);
+  stroke-width: 1.5px;
+}
+
+.decor.dock {
+  fill: rgba(96, 124, 156, 0.72);
+  stroke: rgba(22, 28, 44, 0.8);
+  stroke-width: 1.5px;
+}
+
+.decor.barn {
+  fill: rgba(150, 84, 44, 0.95);
+  stroke: rgba(48, 20, 8, 0.85);
+  stroke-width: 2px;
+}
+
+.decor.flare-base {
+  fill: rgba(84, 94, 110, 0.9);
+}
+
+.decor.flare {
+  fill: rgba(255, 186, 88, 0.82);
+}
+
+.decor.recording {
+  fill: rgba(255, 255, 255, 0.15);
+  stroke: rgba(255, 255, 255, 0.35);
+  stroke-width: 1px;
+  stroke-dasharray: 6 4;
+}
+
 .tile-canvas {
   width: 100%;
   height: 100%;

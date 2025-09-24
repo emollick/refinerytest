@@ -1118,7 +1118,6 @@ surface.addEventListener("mouseleave", () => {
   }
 });
 
-
 surface.addEventListener("click", (event) => {
   const rect = surface.getBoundingClientRect();
   const pointerX = (event.clientX - rect.left) * renderer.deviceScaleX;

@@ -13,7 +13,11 @@ export class RefinerySimulation {
   constructor() {
     this.timeMinutes = 0;
     this.tickInterval = 1; // simulated minute per tick
-    this.speed = 35; // simulated minutes per real second
+    this.baseSpeed = 35; // simulated minutes per real second at 1×
+    this.speedMultiplier = 1;
+    this.minSpeedMultiplier = 0.25;
+    this.maxSpeedMultiplier = 4;
+    this.speed = this.baseSpeed * this.speedMultiplier;
     this._accumulator = 0;
     this.running = true;
     this.stepOnce = false;
@@ -294,6 +298,22 @@ export class RefinerySimulation {
       this.params[key] = value;
     }
   }
+  getSpeedMultiplier() {
+    return this.speedMultiplier;
+  }
+
+  setSpeedMultiplier(multiplier) {
+    const value = typeof multiplier === "number" && Number.isFinite(multiplier) ? multiplier : 1;
+    const clamped = clamp(value, this.minSpeedMultiplier, this.maxSpeedMultiplier);
+    this.speedMultiplier = clamped;
+    this.speed = this.baseSpeed * this.speedMultiplier;
+    return this.speedMultiplier;
+  }
+
+  adjustSpeedMultiplier(delta) {
+    const change = typeof delta === "number" && Number.isFinite(delta) ? delta : 0;
+    return this.setSpeedMultiplier(this.speedMultiplier + change);
+  }
 
   applyScenario(key) {
     if (this.scenarios[key]) {
@@ -322,6 +342,8 @@ export class RefinerySimulation {
     this._accumulator = 0;
     this.running = true;
     this.stepOnce = false;
+    this.speedMultiplier = 1;
+    this.speed = this.baseSpeed;
     this.metrics = {
       gasoline: 0,
       diesel: 0,
@@ -435,12 +457,15 @@ export class RefinerySimulation {
   _advanceTick(deltaMinutes) {
     this.timeMinutes += deltaMinutes;
     const hours = deltaMinutes / 60;
+
     this.logisticsRushCooldown = Math.max(0, this.logisticsRushCooldown - hours);
     this._prunePipelineBoosts();
     const extraOperationalCost = this._consumeOperationalCost();
+
     const scenario = this.activeScenario;
     const crudeSetting = this.params.crudeIntake;
     const crudeAvailable = crudeSetting * scenario.crudeMultiplier;
+
     const distState = this._resolveUnitState("distillation");
     const distillation = distState.unit;
     const distCapacity =
@@ -656,6 +681,8 @@ export class RefinerySimulation {
     const dieselPrice = basePrices.diesel * priceModifier * (1 + scenario.dieselBias * 0.25);
     const jetPrice = basePrices.jet * priceModifier * (1 + demandJetBias * 0.35);
     const lpgPrice = basePrices.lpg * priceModifier * (1 + demandGasolineBias * 0.1);
+
+    const crudeCostPerBbl = 51 * (1 + scenario.qualityShift * 0.8);
     const maintenanceBudget =
       2.2 * this.units.length * (0.5 + this.params.maintenance * 1.4 + scenario.maintenancePenalty);
     const safetyBudget = 1.1 * this.params.safety * this.units.length;
@@ -1254,6 +1281,7 @@ export class RefinerySimulation {
   }
 
   _updateLogistics(context) {
+    const { production, hours, prices, scenario } = context;
     const produced = {
       gasoline: Math.max(0, production.gasoline * hours),
       diesel: Math.max(0, production.diesel * hours),
@@ -2100,6 +2128,410 @@ export class RefinerySimulation {
       };
     });
     return map;
+  }
+  
+  createSnapshot() {
+    const clone = (value) => {
+      if (Array.isArray(value)) {
+        return value.map((item) => clone(item));
+      }
+      if (value && typeof value === "object") {
+        return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, clone(entry)]));
+      }
+      return value;
+    };
+
+    const units = this.units.map((unit) => ({
+      id: unit.id,
+      integrity: unit.integrity,
+      status: unit.status,
+      downtime: unit.downtime,
+      incidents: unit.incidents,
+      manualOffline: unit.manualOffline,
+      emergencyOffline: unit.emergencyOffline,
+      overrideThrottle: unit.overrideThrottle,
+      mode: unit.mode,
+      alert: unit.alert,
+      alertTimer: unit.alertTimer,
+      alertDetail: unit.alertDetail ? clone(unit.alertDetail) : null,
+      lastIncident: unit.lastIncident ? clone(unit.lastIncident) : null,
+    }));
+
+    const snapshot = {
+      version: 1,
+      timeMinutes: this.timeMinutes,
+      running: this.running,
+      speedMultiplier: this.speedMultiplier,
+      params: { ...this.params },
+      scenario: this.activeScenarioKey,
+      metrics: { ...this.metrics },
+      flows: { ...this.flows },
+      marketStress: this.marketStress,
+      pendingOperationalCost: this.pendingOperationalCost,
+      logisticsRushCooldown: this.logisticsRushCooldown,
+      nextShipmentIn: this.nextShipmentIn,
+      emergencyShutdown: this.emergencyShutdown,
+      storage: {
+        capacity: { ...this.storage.capacity },
+        levels: { ...this.storage.levels },
+      },
+      storageAlerts: clone(this.storageAlertCache),
+      shipments: this.shipments.map((shipment) => ({ ...shipment })),
+      shipmentStats: { ...this.shipmentStats },
+      pipelineBoosts: clone(this.pipelineBoosts),
+      unitOverrides: this.getUnitOverrides(),
+      units,
+      directives: this.directives.map((directive) => ({ ...directive })),
+      directiveStats: { ...this.directiveStats },
+      performanceHistory: this.performanceHistory.map((entry) => ({ ...entry })),
+      logs: this.logs.map((entry) => ({ ...entry })),
+    };
+
+    return snapshot;
+  }
+
+  loadSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") {
+      throw new Error("Invalid snapshot payload");
+    }
+
+    this._accumulator = 0;
+    this.stepOnce = false;
+
+    if (typeof snapshot.running === "boolean") {
+      this.running = snapshot.running;
+    }
+
+    if (typeof snapshot.timeMinutes === "number" && Number.isFinite(snapshot.timeMinutes)) {
+      this.timeMinutes = Math.max(0, snapshot.timeMinutes);
+    } else {
+      this.timeMinutes = 0;
+    }
+
+    if (typeof snapshot.speedMultiplier === "number") {
+      this.setSpeedMultiplier(snapshot.speedMultiplier);
+    } else {
+      this.setSpeedMultiplier(1);
+    }
+
+    if (snapshot.params && typeof snapshot.params === "object") {
+      Object.entries(snapshot.params).forEach(([key, value]) => {
+        if (key in this.params && typeof value === "number" && Number.isFinite(value)) {
+          this.params[key] = value;
+        }
+      });
+    }
+
+    if (snapshot.scenario && this.scenarios[snapshot.scenario]) {
+      this.activeScenarioKey = snapshot.scenario;
+      this.activeScenario = this.scenarios[this.activeScenarioKey];
+    }
+
+    if (!this.storage) {
+      this.storage = this._initStorage();
+    }
+    if (!this.storageAlertCache) {
+      this.storageAlertCache = this._createStorageAlertCache();
+    }
+
+    if (snapshot.storage && typeof snapshot.storage === "object") {
+      if (snapshot.storage.capacity && typeof snapshot.storage.capacity === "object") {
+        Object.entries(snapshot.storage.capacity).forEach(([product, capacity]) => {
+          if (typeof capacity === "number" && Number.isFinite(capacity) && capacity > 0) {
+            this.storage.capacity[product] = capacity;
+          }
+        });
+      }
+
+      if (snapshot.storage.levels && typeof snapshot.storage.levels === "object") {
+        Object.entries(snapshot.storage.levels).forEach(([product, level]) => {
+          if (typeof level !== "number" || !Number.isFinite(level)) {
+            return;
+          }
+          const capacity = this.storage.capacity[product] || 0;
+          const clampMax = capacity || Math.max(level, 0);
+          this.storage.levels[product] = clamp(level, 0, clampMax);
+        });
+      }
+    }
+
+    this.storageAlertCache = this._createStorageAlertCache();
+    if (snapshot.storageAlerts && typeof snapshot.storageAlerts === "object") {
+      Object.entries(snapshot.storageAlerts).forEach(([product, cache]) => {
+        if (!cache || typeof cache !== "object") {
+          return;
+        }
+        if (!this.storageAlertCache[product]) {
+          this.storageAlertCache[product] = { ...cache };
+        } else {
+          this.storageAlertCache[product] = {
+            ...this.storageAlertCache[product],
+            ...cache,
+          };
+        }
+      });
+    }
+
+    this.metrics = { ...this.metrics, ...(snapshot.metrics || {}) };
+    this.flows = { ...this.flows, ...(snapshot.flows || {}) };
+
+    if (typeof snapshot.marketStress === "number" && Number.isFinite(snapshot.marketStress)) {
+      this.marketStress = clamp(snapshot.marketStress, 0, 1);
+    }
+
+    this.pendingOperationalCost =
+      typeof snapshot.pendingOperationalCost === "number" && Number.isFinite(snapshot.pendingOperationalCost)
+        ? snapshot.pendingOperationalCost
+        : 0;
+
+    this.logisticsRushCooldown =
+      typeof snapshot.logisticsRushCooldown === "number" && Number.isFinite(snapshot.logisticsRushCooldown)
+        ? Math.max(0, snapshot.logisticsRushCooldown)
+        : 0;
+
+    this.nextShipmentIn =
+      typeof snapshot.nextShipmentIn === "number" && Number.isFinite(snapshot.nextShipmentIn)
+        ? Math.max(0, snapshot.nextShipmentIn)
+        : this.nextShipmentIn;
+
+    if (typeof snapshot.emergencyShutdown === "boolean") {
+      this.emergencyShutdown = snapshot.emergencyShutdown;
+    } else {
+      this.emergencyShutdown = false;
+    }
+
+    if (snapshot.pipelineBoosts && typeof snapshot.pipelineBoosts === "object") {
+      this.pipelineBoosts = {};
+      Object.entries(snapshot.pipelineBoosts).forEach(([stream, boost]) => {
+        if (!boost || typeof boost !== "object") {
+          return;
+        }
+        const multiplier =
+          typeof boost.multiplier === "number" && Number.isFinite(boost.multiplier)
+            ? boost.multiplier
+            : 1;
+        const expiresAt =
+          typeof boost.expiresAt === "number" && Number.isFinite(boost.expiresAt)
+            ? boost.expiresAt
+            : this.timeMinutes;
+        const label = typeof boost.label === "string" ? boost.label : stream;
+        this.pipelineBoosts[stream] = { multiplier, expiresAt, label };
+      });
+    } else {
+      this.pipelineBoosts = {};
+    }
+
+    if (Array.isArray(snapshot.shipments)) {
+      this.shipments = snapshot.shipments.map((shipment, index) => {
+        const id =
+          typeof shipment.id === "string" && shipment.id
+            ? shipment.id
+            : `snapshot-ship-${index}-${Math.random().toString(16).slice(2, 6)}`;
+        const product = shipment.product || "gasoline";
+        const volume =
+          typeof shipment.volume === "number" && Number.isFinite(shipment.volume) ? shipment.volume : 0;
+        const window =
+          typeof shipment.window === "number" && Number.isFinite(shipment.window) ? shipment.window : 0;
+        const dueIn =
+          typeof shipment.dueIn === "number" && Number.isFinite(shipment.dueIn)
+            ? shipment.dueIn
+            : window;
+        const status =
+          shipment.status === "completed" || shipment.status === "missed" || shipment.status === "pending"
+            ? shipment.status
+            : "pending";
+        const createdAt =
+          typeof shipment.createdAt === "number" && Number.isFinite(shipment.createdAt)
+            ? shipment.createdAt
+            : this.timeMinutes;
+        const cooldown =
+          typeof shipment.cooldown === "number" && Number.isFinite(shipment.cooldown)
+            ? Math.max(0, shipment.cooldown)
+            : 0;
+        const record = {
+          id,
+          product,
+          volume,
+          window,
+          dueIn,
+          status,
+          createdAt,
+          cooldown,
+        };
+        if (typeof shipment.completedAt === "number" && Number.isFinite(shipment.completedAt)) {
+          record.completedAt = shipment.completedAt;
+        }
+        if (typeof shipment.shortage === "number" && Number.isFinite(shipment.shortage)) {
+          record.shortage = Math.max(0, shipment.shortage);
+        }
+        return record;
+      });
+    } else {
+      this.shipments = [];
+    }
+
+    if (snapshot.shipmentStats && typeof snapshot.shipmentStats === "object") {
+      const { total, onTime, missed } = snapshot.shipmentStats;
+      this.shipmentStats = {
+        total: typeof total === "number" && Number.isFinite(total) ? Math.max(0, total) : 0,
+        onTime: typeof onTime === "number" && Number.isFinite(onTime) ? Math.max(0, onTime) : 0,
+        missed: typeof missed === "number" && Number.isFinite(missed) ? Math.max(0, missed) : 0,
+      };
+    } else {
+      this.shipmentStats = { total: 0, onTime: 0, missed: 0 };
+    }
+
+    this.units.forEach((unit) => {
+      unit.throughput = 0;
+      unit.utilization = 0;
+    });
+
+    if (Array.isArray(snapshot.units)) {
+      snapshot.units.forEach((entry) => {
+        const unit = entry && this.unitMap[entry.id];
+        if (!unit) {
+          return;
+        }
+        if (typeof entry.integrity === "number" && Number.isFinite(entry.integrity)) {
+          unit.integrity = clamp(entry.integrity, 0, 1);
+        }
+        if (typeof entry.downtime === "number" && Number.isFinite(entry.downtime)) {
+          unit.downtime = Math.max(0, entry.downtime);
+        }
+        if (typeof entry.incidents === "number" && Number.isFinite(entry.incidents)) {
+          unit.incidents = Math.max(0, entry.incidents);
+        }
+        if (typeof entry.status === "string") {
+          unit.status = entry.status;
+        }
+        unit.manualOffline = Boolean(entry.manualOffline);
+        unit.emergencyOffline = Boolean(entry.emergencyOffline);
+        if (typeof entry.overrideThrottle === "number" && Number.isFinite(entry.overrideThrottle)) {
+          unit.overrideThrottle = clamp(entry.overrideThrottle, 0, 1.2);
+        }
+        if (typeof entry.mode === "string") {
+          unit.mode = entry.mode;
+        }
+        if (typeof entry.alert === "string" || entry.alert === null) {
+          unit.alert = entry.alert;
+        }
+        if (typeof entry.alertTimer === "number" && Number.isFinite(entry.alertTimer)) {
+          unit.alertTimer = Math.max(0, entry.alertTimer);
+        } else {
+          unit.alertTimer = Math.max(0, unit.alertTimer || 0);
+        }
+        unit.alertDetail = entry.alertDetail ? { ...entry.alertDetail } : null;
+        unit.lastIncident = entry.lastIncident ? { ...entry.lastIncident } : null;
+      });
+    }
+
+    this.unitOverrides = {};
+    if (snapshot.unitOverrides && typeof snapshot.unitOverrides === "object") {
+      Object.entries(snapshot.unitOverrides).forEach(([unitId, override]) => {
+        if (!override || typeof override !== "object") {
+          return;
+        }
+        const unit = this.unitMap[unitId];
+        if (!unit) {
+          return;
+        }
+        const record = {};
+        if (typeof override.throttle === "number" && Number.isFinite(override.throttle)) {
+          record.throttle = clamp(override.throttle, 0, 1.2);
+          unit.overrideThrottle = record.throttle;
+        }
+        if (override.offline) {
+          record.offline = true;
+          unit.manualOffline = unit.manualOffline || !unit.emergencyOffline;
+          if (unit.downtime <= 0 && unit.status !== "offline") {
+            unit.status = "standby";
+          }
+        }
+        if (Object.keys(record).length) {
+          this.unitOverrides[unitId] = record;
+        }
+      });
+    }
+
+    if (Array.isArray(snapshot.directives)) {
+      this.directives = snapshot.directives.map((directive) => ({ ...directive }));
+    } else {
+      this.directives = [];
+    }
+    while (this.directives.length < 3) {
+      this.directives.push(this._createDirective());
+    }
+
+    if (snapshot.directiveStats && typeof snapshot.directiveStats === "object") {
+      this.directiveStats = {
+        total:
+          typeof snapshot.directiveStats.total === "number" && Number.isFinite(snapshot.directiveStats.total)
+            ? Math.max(0, snapshot.directiveStats.total)
+            : 0,
+        completed:
+          typeof snapshot.directiveStats.completed === "number" && Number.isFinite(snapshot.directiveStats.completed)
+            ? Math.max(0, snapshot.directiveStats.completed)
+            : 0,
+        failed:
+          typeof snapshot.directiveStats.failed === "number" && Number.isFinite(snapshot.directiveStats.failed)
+            ? Math.max(0, snapshot.directiveStats.failed)
+            : 0,
+      };
+    } else {
+      this.directiveStats = { total: this.directives.length, completed: 0, failed: 0 };
+    }
+
+    if (Array.isArray(snapshot.performanceHistory)) {
+      this.performanceHistory = snapshot.performanceHistory
+        .filter((entry) => entry && typeof entry === "object")
+        .map((entry) => ({ ...entry }))
+        .slice(-120);
+    } else {
+      this.performanceHistory = [];
+    }
+
+    if (Array.isArray(snapshot.logs)) {
+      this.logs = snapshot.logs
+        .filter((entry) => entry && typeof entry === "object")
+        .map((entry) => ({
+          level: entry.level || "info",
+          message: entry.message || "",
+          timestamp: entry.timestamp || this._formatTime(),
+          unitId: entry.unitId,
+          product: entry.product,
+        }))
+        .slice(-80);
+    } else {
+      this.logs = [];
+    }
+
+    const storageLevels = this.storage?.levels || {};
+    const storageCapacity = this.storage?.capacity || {};
+    const levelTotal =
+      (storageLevels.gasoline || 0) + (storageLevels.diesel || 0) + (storageLevels.jet || 0);
+    const capacityTotal =
+      (storageCapacity.gasoline || 0) + (storageCapacity.diesel || 0) + (storageCapacity.jet || 0);
+    this.metrics.storageGasoline = this._round(storageLevels.gasoline || 0);
+    this.metrics.storageDiesel = this._round(storageLevels.diesel || 0);
+    this.metrics.storageJet = this._round(storageLevels.jet || 0);
+    this.metrics.storageUtilization = capacityTotal ? clamp(levelTotal / capacityTotal, 0, 1) : 0;
+
+    const shipmentTotal = Math.max(0, this.shipmentStats.total || 0);
+    const onTime = Math.max(0, this.shipmentStats.onTime || 0);
+    this.metrics.shipmentReliability = shipmentTotal ? clamp(onTime / shipmentTotal, 0, 1) : 1;
+
+    this.metrics.directivesCompleted = this.directiveStats.completed || 0;
+    const directiveTotal = Math.max(0, this.directiveStats.total || 0);
+    const directiveReliability = directiveTotal
+      ? clamp((this.directiveStats.completed || 0) / directiveTotal, 0, 1)
+      : 1;
+    this.metrics.directiveReliability = directiveReliability;
+
+    if (!Number.isFinite(this.metrics.reliability) || this.metrics.reliability === undefined) {
+      const averageIntegrity =
+        this.units.reduce((sum, unit) => sum + (unit.integrity || 0), 0) / Math.max(1, this.units.length);
+      this.metrics.reliability = clamp(averageIntegrity, 0, 1);
+    }
   }
 
   setUnitThrottle(unitId, fraction, options = {}) {
