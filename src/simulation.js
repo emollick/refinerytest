@@ -682,7 +682,7 @@ export class RefinerySimulation {
     const jetPrice = basePrices.jet * priceModifier * (1 + demandJetBias * 0.35);
     const lpgPrice = basePrices.lpg * priceModifier * (1 + demandGasolineBias * 0.1);
 
-    const crudeCostPerBbl = 51 * (1 + scenario.qualityShift * 0.8);
+    const crudeCostPerBbl = this._resolveCrudeCostPerBarrel(scenario);
     const maintenanceBudget =
       2.2 * this.units.length * (0.5 + this.params.maintenance * 1.4 + scenario.maintenancePenalty);
     const safetyBudget = 1.1 * this.params.safety * this.units.length;
@@ -725,6 +725,7 @@ export class RefinerySimulation {
     this.metrics.diesel = this._round(result.diesel);
     this.metrics.jet = this._round(result.jet);
     this.metrics.lpg = this._round(result.lpg);
+    this.metrics.crudeCostPerBbl = crudeCostPerBbl;
     this.metrics.profitPerHour = profitPerHour;
     this.metrics.revenuePerDay = adjustedRevenue;
     this.metrics.expensePerDay = totalOperatingExpense;
@@ -1389,6 +1390,12 @@ export class RefinerySimulation {
     const cost = this.pendingOperationalCost || 0;
     this.pendingOperationalCost = 0;
     return cost;
+  }
+
+  _resolveCrudeCostPerBarrel(scenario) {
+    const base = scenario?.crudeBasePrice ?? 51;
+    const qualityShift = scenario?.qualityShift ?? 0;
+    return base * (1 + qualityShift * 0.8);
   }
 
   _calculateFixedOverhead({ crudeThroughput, scenario }) {
@@ -2129,7 +2136,6 @@ export class RefinerySimulation {
     });
     return map;
   }
-  
   createSnapshot() {
     const clone = (value) => {
       if (Array.isArray(value)) {

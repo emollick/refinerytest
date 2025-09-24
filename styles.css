@@ -304,8 +304,9 @@ body {
   border: 3px solid #0f1828;
   box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.35);
   background: #061020;
-  cursor: crosshair;
+  cursor: grab;
   user-select: none;
+  touch-action: none;
 }
 
 #map-viewport.panning {
@@ -342,6 +343,33 @@ body {
 .tile-layer .tile {
   stroke: rgba(16, 24, 36, 0.5);
   stroke-width: 1px;
+}
+
+.road-surface,
+.road-surface .road-part {
+  pointer-events: none;
+  stroke: rgba(10, 14, 22, 0.55);
+  stroke-width: 1.4px;
+  opacity: 0.96;
+}
+
+.road-surface.cross .road-part {
+  stroke-width: 1.2px;
+}
+
+.walkway {
+  pointer-events: none;
+  stroke: rgba(30, 24, 18, 0.4);
+  stroke-width: 1px;
+  opacity: 0.9;
+}
+
+.road-centerline {
+  pointer-events: none;
+  stroke-width: 1.2px;
+  stroke-dasharray: 10 8;
+  stroke-linecap: round;
+  opacity: 0.75;
 }
 
 .tile-layer.grid .grid-line {

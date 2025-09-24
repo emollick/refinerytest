@@ -65,8 +65,8 @@ export class UIController {
       currency: "USD",
       maximumFractionDigits: 0,
     });
-
     this.flowFormatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
+
     this._bindControls();
     this._populateScenarios();
     this._updateSliderLabels();

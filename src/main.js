@@ -1,5 +1,5 @@
-import { RefinerySimulation } from "./simulation.js";
-import { UIController } from "./ui.js";
+import { RefinerySimulation } from "./simulation.js?v=2";
+import { UIController } from "./ui.js?v=2";
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
@@ -200,6 +200,15 @@ class TileRenderer {
     this.deviceScaleX = 1;
     this.deviceScaleY = 1;
     this.paletteIndex = 0;
+    this.camera = {
+      zoom: 1,
+      minZoom: 0.65,
+      maxZoom: 2.8,
+      offsetX: 0,
+      offsetY: 0,
+      userControlled: false,
+    };
+    this.panSession = null;
 
     this.palettes = [
       {
@@ -212,6 +221,9 @@ class TileRenderer {
         green: "#76a08c",
         field: "#a37a41",
         fieldAlt: "#c99c50",
+        road: "#3f465c",
+        roadLine: "#dcd4a4",
+        walkway: "#bfa98b",
         grid: "rgba(32, 40, 54, 0.4)",
         outline: "#1c1d20",
         pipeBase: "#76aee8",
@@ -228,6 +240,9 @@ class TileRenderer {
         green: "#6b9aa2",
         field: "#996a33",
         fieldAlt: "#bf8c3c",
+        road: "#3a4255",
+        roadLine: "#e2dcae",
+        walkway: "#b69f82",
         grid: "rgba(20, 32, 48, 0.42)",
         outline: "#16171c",
         pipeBase: "#8ec8ff",
@@ -246,6 +261,8 @@ class TileRenderer {
       "aria-hidden": "true",
     });
     this.container.appendChild(this.svg);
+    this.worldGroup = createSvgElement("g", { class: "map-world" });
+    this.svg.appendChild(this.worldGroup);
 
     this.layers = {
       base: this._createLayer("tile-layer base"),
@@ -266,6 +283,8 @@ class TileRenderer {
     this.tankNodes = this._createTankNodes();
 
     this._applyPalette();
+    this.mapBounds = this._calculateMapBounds();
+    this._fitCameraToView();
     this.resizeToContainer(this.container);
   }
 
@@ -283,6 +302,14 @@ class TileRenderer {
     this.svg.style.height = `${height}px`;
     this.deviceScaleX = this.viewWidth / width;
     this.deviceScaleY = this.viewHeight / height;
+    this.displayWidth = width;
+    this.displayHeight = height;
+    if (!this.camera.userControlled) {
+      this._fitCameraToView({ preserveZoom: true });
+    } else {
+      this._clampCamera();
+      this._updateCameraTransform();
+    }
   }
 
   setGridVisible(visible) {
@@ -311,6 +338,9 @@ class TileRenderer {
     this.selectedUnitId = unitId;
     for (const [id, node] of this.unitNodes.entries()) {
       node.group.classList.toggle("selected", id === unitId);
+    }
+    if (unitId) {
+      this.focusOnUnit(unitId, { onlyIfVisible: true });
     }
   }
 
@@ -395,8 +425,10 @@ class TileRenderer {
   }
 
   screenToIso(clientX, clientY) {
-    const x = (clientX - this.originX) / (this.tileWidth / 2);
-    const y = (clientY - this.originY) / (this.tileHeight / 2);
+    const adjustedX = (clientX - this.camera.offsetX) / this.camera.zoom;
+    const adjustedY = (clientY - this.camera.offsetY) / this.camera.zoom;
+    const x = (adjustedX - this.originX) / (this.tileWidth / 2);
+    const y = (adjustedY - this.originY) / (this.tileHeight / 2);
     const isoX = (x + y) / 2;
     const isoY = (y - x) / 2;
     return { x: isoX, y: isoY };
@@ -415,6 +447,8 @@ class TileRenderer {
 
   resetView() {
     this.pointer.active = false;
+    this.camera.userControlled = false;
+    this._fitCameraToView({ preserveZoom: false });
   }
 
   getSurfaceBounds() {
@@ -423,7 +457,7 @@ class TileRenderer {
 
   _createLayer(className) {
     const group = createSvgElement("g", { class: className });
-    this.svg.appendChild(group);
+    this.worldGroup.appendChild(group);
     return group;
   }
 
@@ -437,7 +471,12 @@ class TileRenderer {
           points: pointsToString(this._tileDiamondPoints(x, y)),
         });
         this.layers.base.appendChild(polygon);
-        nodes.push({ polygon, type, x, y });
+        const tile = { polygon, type, x, y };
+        const overlay = this._decorateTile(tile);
+        if (overlay) {
+          tile.overlay = overlay;
+        }
+        nodes.push(tile);
       }
     }
     return nodes;
@@ -456,6 +495,95 @@ class TileRenderer {
       }
     }
     return nodes;
+  }
+
+  _decorateTile(tile) {
+    const [baseType, orientation] = tile.type.split("-");
+    const corners = this._tileDiamondPoints(tile.x, tile.y);
+    const [topCorner, rightCorner, bottomCorner, leftCorner] = corners;
+    const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+    if (baseType === "road") {
+      const dir = orientation || "ew";
+      const buildPoints = (direction) => {
+        if (direction === "ns") {
+          return [
+            lerp(topCorner, rightCorner, 0.4),
+            lerp(topCorner, leftCorner, 0.4),
+            lerp(bottomCorner, leftCorner, 0.4),
+            lerp(bottomCorner, rightCorner, 0.4),
+          ];
+        }
+        return [
+          lerp(leftCorner, topCorner, 0.4),
+          lerp(rightCorner, topCorner, 0.4),
+          lerp(rightCorner, bottomCorner, 0.4),
+          lerp(leftCorner, bottomCorner, 0.4),
+        ];
+      };
+      const createLine = (direction) => {
+        if (direction === "ns") {
+          const start = lerp(topCorner, bottomCorner, 0.12);
+          const end = lerp(topCorner, bottomCorner, 0.88);
+          return this._createRoadLine(start, end);
+        }
+        if (direction === "ew") {
+          const start = lerp(leftCorner, rightCorner, 0.12);
+          const end = lerp(leftCorner, rightCorner, 0.88);
+          return this._createRoadLine(start, end);
+        }
+        return null;
+      };
+      if (dir === "cross") {
+        const group = createSvgElement("g", { class: "road-surface cross" });
+        const horizontal = createSvgElement("polygon", {
+          class: "road-part ew",
+          points: pointsToString(buildPoints("ew")),
+        });
+        const vertical = createSvgElement("polygon", {
+          class: "road-part ns",
+          points: pointsToString(buildPoints("ns")),
+        });
+        group.appendChild(horizontal);
+        group.appendChild(vertical);
+        this.layers.decor.appendChild(group);
+        const lines = [createLine("ew"), createLine("ns")].filter(Boolean);
+        return { node: group, type: "road", orientation: dir, parts: [horizontal, vertical], lines };
+      }
+      const polygon = createSvgElement("polygon", {
+        class: `road-surface ${dir}`,
+        points: pointsToString(buildPoints(dir)),
+      });
+      this.layers.decor.appendChild(polygon);
+      const line = createLine(dir);
+      return { node: polygon, type: "road", orientation: dir, line };
+    }
+    if (baseType === "walkway") {
+      const points = [
+        lerp(corners[0], corners[1], 0.6),
+        lerp(corners[0], corners[3], 0.6),
+        lerp(corners[2], corners[3], 0.6),
+        lerp(corners[2], corners[1], 0.6),
+      ];
+      const polygon = createSvgElement("polygon", {
+        class: "walkway",
+        points: pointsToString(points),
+      });
+      this.layers.decor.appendChild(polygon);
+      return { node: polygon, type: "walkway" };
+    }
+    return null;
+  }
+
+  _createRoadLine(start, end) {
+    const line = createSvgElement("line", {
+      class: "road-centerline",
+      x1: start[0].toFixed(1),
+      y1: start[1].toFixed(1),
+      x2: end[0].toFixed(1),
+      y2: end[1].toFixed(1),
+    });
+    this.layers.decor.appendChild(line);
+    return line;
   }
 
   _createDecorNodes() {
@@ -707,6 +835,23 @@ class TileRenderer {
       const color = palette[tile.type] || palette.pavement;
       tile.polygon.setAttribute("fill", color);
       tile.polygon.style.fill = color;
+      if (tile.overlay) {
+        const overlayColor = tile.overlay.type === "walkway" ? palette.walkway : palette.road;
+        if (overlayColor) {
+          if (tile.overlay.parts && tile.overlay.parts.length) {
+            tile.overlay.parts.forEach((part) => part.setAttribute("fill", overlayColor));
+          } else {
+            tile.overlay.node.setAttribute("fill", overlayColor);
+          }
+        }
+        if (palette.roadLine) {
+          if (tile.overlay.lines && tile.overlay.lines.length) {
+            tile.overlay.lines.forEach((line) => line.setAttribute("stroke", palette.roadLine));
+          } else if (tile.overlay.line) {
+            tile.overlay.line.setAttribute("stroke", palette.roadLine);
+          }
+        }
+      }
     });
     this.gridNodes.forEach((grid) => {
       grid.setAttribute("stroke", palette.grid);
@@ -742,6 +887,188 @@ class TileRenderer {
     }
   }
 
+  _calculateMapBounds() {
+    const corners = [
+      this._isoToScreen(0, 0),
+      this._isoToScreen(this.mapCols, 0),
+      this._isoToScreen(0, this.mapRows),
+      this._isoToScreen(this.mapCols, this.mapRows),
+    ];
+    const xs = corners.map((point) => point.x);
+    const ys = corners.map((point) => point.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    return {
+      minX,
+      maxX,
+      minY,
+      maxY,
+      width: maxX - minX,
+      height: maxY - minY,
+      centerX: (minX + maxX) / 2,
+      centerY: (minY + maxY) / 2,
+    };
+  }
+
+  _fitCameraToView({ preserveZoom = false } = {}) {
+    if (!this.mapBounds) {
+      return;
+    }
+    const marginX = 160;
+    const marginY = 140;
+    const availableWidth = this.viewWidth - marginX;
+    const availableHeight = this.viewHeight - marginY;
+    if (!preserveZoom) {
+      const scaleX = availableWidth / Math.max(1, this.mapBounds.width);
+      const scaleY = availableHeight / Math.max(1, this.mapBounds.height);
+      const targetZoom = clamp(Math.min(scaleX, scaleY), this.camera.minZoom, this.camera.maxZoom);
+      this.camera.zoom = targetZoom;
+    }
+    const offsetX = this.viewWidth / 2 - this.mapBounds.centerX * this.camera.zoom;
+    const offsetY = this.viewHeight / 2 - this.mapBounds.centerY * this.camera.zoom;
+    this.camera.offsetX = offsetX;
+    this.camera.offsetY = offsetY;
+    this._clampCamera();
+    this._updateCameraTransform();
+  }
+
+  _updateCameraTransform() {
+    const { zoom, offsetX, offsetY } = this.camera;
+    const matrix = `${zoom.toFixed(4)} 0 0 ${zoom.toFixed(4)} ${offsetX.toFixed(2)} ${offsetY.toFixed(2)}`;
+    this.worldGroup.setAttribute("transform", `matrix(${matrix})`);
+  }
+
+  _clampCamera() {
+    if (!this.mapBounds) {
+      return;
+    }
+    const { minX, maxX, minY, maxY } = this.mapBounds;
+    const { zoom } = this.camera;
+    let { offsetX, offsetY } = this.camera;
+    const margin = 48;
+    const left = minX * zoom + offsetX;
+    const right = maxX * zoom + offsetX;
+    const top = minY * zoom + offsetY;
+    const bottom = maxY * zoom + offsetY;
+    const width = this.viewWidth;
+    const height = this.viewHeight;
+
+    if (right - left < width - margin * 2) {
+      const mid = (left + right) / 2;
+      const desired = width / 2;
+      offsetX += desired - mid;
+    } else {
+      if (left > margin) {
+        offsetX -= left - margin;
+      }
+      if (right < width - margin) {
+        offsetX += width - margin - right;
+      }
+    }
+
+    if (bottom - top < height - margin * 2) {
+      const mid = (top + bottom) / 2;
+      const desired = height / 2;
+      offsetY += desired - mid;
+    } else {
+      if (top > margin) {
+        offsetY -= top - margin;
+      }
+      if (bottom < height - margin) {
+        offsetY += height - margin - bottom;
+      }
+    }
+
+    this.camera.offsetX = offsetX;
+    this.camera.offsetY = offsetY;
+  }
+
+  beginPan(screenX, screenY) {
+    this.panSession = {
+      startX: screenX,
+      startY: screenY,
+      baseOffsetX: this.camera.offsetX,
+      baseOffsetY: this.camera.offsetY,
+    };
+    this.camera.userControlled = true;
+  }
+
+  panTo(screenX, screenY) {
+    if (!this.panSession) {
+      return;
+    }
+    const dx = screenX - this.panSession.startX;
+    const dy = screenY - this.panSession.startY;
+    this.camera.offsetX = this.panSession.baseOffsetX + dx;
+    this.camera.offsetY = this.panSession.baseOffsetY + dy;
+    this._clampCamera();
+    this._updateCameraTransform();
+  }
+
+  endPan() {
+    this.panSession = null;
+  }
+
+  isPanning() {
+    return Boolean(this.panSession);
+  }
+
+  zoomAt(screenX, screenY, deltaY) {
+    const zoomFactor = Math.exp(-deltaY * 0.0012);
+    const nextZoom = clamp(this.camera.zoom * zoomFactor, this.camera.minZoom, this.camera.maxZoom);
+    if (Math.abs(nextZoom - this.camera.zoom) < 0.0001) {
+      return;
+    }
+    const worldX = (screenX - this.camera.offsetX) / this.camera.zoom;
+    const worldY = (screenY - this.camera.offsetY) / this.camera.zoom;
+    this.camera.zoom = nextZoom;
+    this.camera.offsetX = screenX - worldX * nextZoom;
+    this.camera.offsetY = screenY - worldY * nextZoom;
+    this.camera.userControlled = true;
+    this._clampCamera();
+    this._updateCameraTransform();
+  }
+
+  focusOnUnit(unitId, { onlyIfVisible = true } = {}) {
+    if (!unitId) {
+      return;
+    }
+    const unit = this.unitDefs.find((entry) => entry.id === unitId);
+    if (!unit) {
+      return;
+    }
+    const center = this._tileToScreen(unit.tileX + unit.width / 2, unit.tileY + unit.height / 2);
+    const screen = this._worldToScreen(center.x, center.y);
+    const margin = 120;
+    if (
+      onlyIfVisible &&
+      screen.x >= margin &&
+      screen.x <= this.viewWidth - margin &&
+      screen.y >= margin &&
+      screen.y <= this.viewHeight - margin
+    ) {
+      return;
+    }
+    this._moveCameraTo(center.x, center.y);
+    this.camera.userControlled = true;
+  }
+
+  _worldToScreen(worldX, worldY) {
+    return {
+      x: worldX * this.camera.zoom + this.camera.offsetX,
+      y: worldY * this.camera.zoom + this.camera.offsetY,
+    };
+  }
+
+  _moveCameraTo(worldX, worldY) {
+    this.camera.offsetX = this.viewWidth / 2 - worldX * this.camera.zoom;
+    this.camera.offsetY = this.viewHeight / 2 - worldY * this.camera.zoom;
+    this._clampCamera();
+    this._updateCameraTransform();
+  }
+
   _buildBaseTiles() {
     const tiles = Array.from({ length: this.mapRows }, () =>
       Array.from({ length: this.mapCols }, () => "pavement")
@@ -765,6 +1092,33 @@ class TileRenderer {
           tiles[y][x] = "grass";
         } else if (y >= 3 && y <= 4 && x >= 3 && x <= 5) {
           tiles[y][x] = "green";
+        }
+        const current = tiles[y][x];
+        if (
+          y === 5 &&
+          x >= 2 &&
+          x <= this.mapCols - 2 &&
+          current !== "water" &&
+          current !== "shore"
+        ) {
+          tiles[y][x] = current?.startsWith("road") ? "road-cross" : "road-ew";
+        }
+        if (
+          x === 7 &&
+          y >= 2 &&
+          y <= this.mapRows - 2 &&
+          current !== "water" &&
+          current !== "shore"
+        ) {
+          tiles[y][x] = tiles[y][x]?.startsWith("road") ? "road-cross" : "road-ns";
+        }
+        if (
+          (x === 6 || x === 8 || (y === 6 && (x === 5 || x === 9))) &&
+          tiles[y][x] !== "water" &&
+          tiles[y][x] !== "shore" &&
+          !tiles[y][x]?.startsWith("road")
+        ) {
+          tiles[y][x] = "walkway";
         }
       }
     }
@@ -918,6 +1272,9 @@ let lastPulseRefresh = 0;
 let gridVisible = true;
 let flowOverlayVisible = true;
 let activeMenu = null;
+let panPointerId = null;
+let panMoved = false;
+let panStart = { x: 0, y: 0 };
 const PRESETS = {
   auto: {
     label: "AUTO",
@@ -1095,6 +1452,9 @@ window.addEventListener("resize", () => renderer.resizeToContainer(mapViewport))
 renderer.resizeToContainer(mapViewport);
 
 surface.addEventListener("mousemove", (event) => {
+  if (typeof renderer.isPanning === "function" && renderer.isPanning()) {
+    return;
+  }
   const rect = surface.getBoundingClientRect();
   const pointerX = (event.clientX - rect.left) * renderer.deviceScaleX;
   const pointerY = (event.clientY - rect.top) * renderer.deviceScaleY;
@@ -1118,7 +1478,82 @@ surface.addEventListener("mouseleave", () => {
   }
 });
 
+surface.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0) {
+    return;
+  }
+  const rect = surface.getBoundingClientRect();
+  const pointerX = (event.clientX - rect.left) * renderer.deviceScaleX;
+  const pointerY = (event.clientY - rect.top) * renderer.deviceScaleY;
+  panPointerId = event.pointerId;
+  panStart = { x: pointerX, y: pointerY };
+  panMoved = false;
+  surface.setPointerCapture(event.pointerId);
+});
+
+surface.addEventListener("pointermove", (event) => {
+  if (panPointerId !== event.pointerId) {
+    return;
+  }
+  const rect = surface.getBoundingClientRect();
+  const pointerX = (event.clientX - rect.left) * renderer.deviceScaleX;
+  const pointerY = (event.clientY - rect.top) * renderer.deviceScaleY;
+  if (!renderer.isPanning()) {
+    const dx = pointerX - panStart.x;
+    const dy = pointerY - panStart.y;
+    if (Math.hypot(dx, dy) > 6) {
+      renderer.beginPan(panStart.x, panStart.y);
+      renderer.setPointer(0, 0, false);
+      if (mapViewport) {
+        mapViewport.classList.add("panning");
+      }
+    } else {
+      return;
+    }
+  }
+  renderer.panTo(pointerX, pointerY);
+  panMoved = true;
+});
+
+const endPan = (event) => {
+  if (panPointerId !== event.pointerId) {
+    return;
+  }
+  if (renderer.isPanning()) {
+    renderer.endPan();
+  }
+  if (mapViewport) {
+    mapViewport.classList.remove("panning");
+  }
+  surface.releasePointerCapture(event.pointerId);
+  panPointerId = null;
+};
+
+surface.addEventListener("pointerup", (event) => {
+  endPan(event);
+});
+
+surface.addEventListener("pointercancel", (event) => {
+  endPan(event);
+});
+
+surface.addEventListener(
+  "wheel",
+  (event) => {
+    event.preventDefault();
+    const rect = surface.getBoundingClientRect();
+    const pointerX = (event.clientX - rect.left) * renderer.deviceScaleX;
+    const pointerY = (event.clientY - rect.top) * renderer.deviceScaleY;
+    renderer.zoomAt(pointerX, pointerY, event.deltaY);
+  },
+  { passive: false }
+);
+
 surface.addEventListener("click", (event) => {
+  if (panMoved) {
+    panMoved = false;
+    return;
+  }
   const rect = surface.getBoundingClientRect();
   const pointerX = (event.clientX - rect.left) * renderer.deviceScaleX;
   const pointerY = (event.clientY - rect.top) * renderer.deviceScaleY;
@@ -2174,6 +2609,7 @@ function renderPrototypeNotes() {
     "Session → Load Old/New drop you into curated Chevron training scenarios with different bottlenecks to solve.",
     "ROAD dispatches a truck convoy to bleed down whichever product tanks are overflowing the most.",
     "PIPE stages a temporary bypass for the selected unit’s feed, while BULLDOZE schedules a turnaround to restore integrity.",
+    "Drag the refinery map to pan and use the mouse wheel to zoom in on the SimCity-style detail work.",
   ].forEach((line) => {
     const item = document.createElement("li");
     item.textContent = line;
