@@ -592,7 +592,6 @@ class TileRenderer {
       [right[0], right[1] + drop],
     ];
   }
-
   _createGrid() {
     const nodes = [];
     for (let y = 0; y < this.mapRows; y += 1) {
@@ -1572,7 +1571,6 @@ class TileRenderer {
     this.camera.offsetX = offsetX;
     this.camera.offsetY = offsetY;
   }
-
   _stabilizeCamera() {
     if (this.camera.userControlled) {
       return;
@@ -2056,7 +2054,6 @@ initializeMenus();
 updateMenuToggle(simulation.running);
 setGridVisibility(gridVisible);
 setFlowVisibility(flowOverlayVisible);
-
 populateScenarioMenu();
 populateUnitMenu();
 buildProcessLegend();
