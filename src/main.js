@@ -1949,7 +1949,6 @@ initializeMenus();
 updateMenuToggle(simulation.running);
 setGridVisibility(gridVisible);
 setFlowVisibility(flowOverlayVisible);
-
 populateScenarioMenu();
 populateUnitMenu();
 buildProcessLegend();

@@ -510,6 +510,7 @@ body {
 .unit-highlight {
   fill: none;
   stroke: rgba(255, 244, 180, 0.45);
+
   stroke-width: 4px;
   stroke-linejoin: round;
 }
@@ -517,6 +518,7 @@ body {
 .unit-detail {
   stroke-linejoin: round;
   fill-opacity: 0.92;
+
 }
 
 .unit-label {
