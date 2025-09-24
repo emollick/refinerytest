@@ -298,7 +298,7 @@ export class RefinerySimulation {
       this.params[key] = value;
     }
   }
-
+  
   getSpeedMultiplier() {
     return this.speedMultiplier;
   }
@@ -2137,7 +2137,6 @@ export class RefinerySimulation {
     });
     return map;
   }
-
   createSnapshot() {
     const clone = (value) => {
       if (Array.isArray(value)) {
