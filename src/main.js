@@ -1561,36 +1561,39 @@ resetView() {
 
 _fitCameraToView({ preserveZoom = false } = {}) {
   if (!this.mapBounds) {
+    this.mapBounds = this._calculateMapBounds();
+  }
+  
+  // Don't recalculate if we already have a valid home position
+  if (this.camera.homeZoom !== 1 || this.camera.homeOffsetX !== 0 || this.camera.homeOffsetY !== 0) {
+    // Just apply existing home values
+    if (!this.camera.userControlled) {
+      this.camera.zoom = this.camera.homeZoom;
+      this.camera.offsetX = this.camera.homeOffsetX;
+      this.camera.offsetY = this.camera.homeOffsetY;
+      this._updateCameraTransform();
+    }
     return;
   }
+  
+  // Only calculate home position once
   const marginX = 160;
   const marginY = 140;
   const availableWidth = this.viewWidth - marginX;
   const availableHeight = this.viewHeight - marginY;
   
-  if (!preserveZoom) {
-    const scaleX = availableWidth / Math.max(1, this.mapBounds.width);
-    const scaleY = availableHeight / Math.max(1, this.mapBounds.height);
-    const targetZoom = clamp(Math.min(scaleX, scaleY), this.camera.minZoom, this.camera.maxZoom);
-    this.camera.zoom = targetZoom;
-  } else {
-    this.camera.zoom = clamp(this.camera.zoom, this.camera.minZoom, this.camera.maxZoom);
-  }
+  const scaleX = availableWidth / Math.max(1, this.mapBounds.width);
+  const scaleY = availableHeight / Math.max(1, this.mapBounds.height);
+  const targetZoom = clamp(Math.min(scaleX, scaleY), this.camera.minZoom, this.camera.maxZoom);
   
-  const centered = this._centeredOffsets(this.camera.zoom);
-  this.camera.offsetX = centered.offsetX;
-  this.camera.offsetY = centered.offsetY;
-  this._clampCamera();
+  this.camera.homeZoom = targetZoom;
+  const centered = this._centeredOffsets(targetZoom);
+  this.camera.homeOffsetX = Math.round(centered.offsetX * 100) / 100;
+  this.camera.homeOffsetY = Math.round(centered.offsetY * 100) / 100;
   
-  // Round to prevent drift
-  this.camera.homeOffsetX = Math.round(this.camera.offsetX * 100) / 100;
-  this.camera.homeOffsetY = Math.round(this.camera.offsetY * 100) / 100;
-  this.camera.homeZoom = Math.round(this.camera.zoom * 10000) / 10000;
-  
-  // Set exact values
+  this.camera.zoom = this.camera.homeZoom;
   this.camera.offsetX = this.camera.homeOffsetX;
   this.camera.offsetY = this.camera.homeOffsetY;
-  this.camera.zoom = this.camera.homeZoom;
   
   this._updateCameraTransform();
 }
@@ -1677,6 +1680,7 @@ _ensureCameraVisible() {
 }
 
 _stabilizeCamera() {
+    return; // Disable stabilization completely
   if (this.camera.userControlled) {
     if (this._clampCamera()) {
       this._updateCameraTransform();
