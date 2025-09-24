@@ -298,6 +298,7 @@ export class RefinerySimulation {
       this.params[key] = value;
     }
   }
+  
   getSpeedMultiplier() {
     return this.speedMultiplier;
   }

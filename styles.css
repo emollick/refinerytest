@@ -340,9 +340,21 @@ body {
   display: none;
 }
 
-.tile-layer .tile {
-  stroke: rgba(16, 24, 36, 0.5);
-  stroke-width: 1px;
+
+.tile-layer .tile-base {
+  stroke: rgba(16, 24, 36, 0.55);
+  stroke-width: 1.2px;
+  stroke-linejoin: round;
+}
+
+.tile-layer .tile-highlight {
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+
+.tile-layer .tile-shadow {
+  pointer-events: none;
+  mix-blend-mode: multiply;
 }
 
 .road-surface,
@@ -374,9 +386,26 @@ body {
 
 .tile-layer.grid .grid-line {
   fill: none;
-  stroke: rgba(20, 40, 60, 0.4);
-  stroke-width: 1px;
-  stroke-dasharray: 3 9;
+
+  stroke: rgba(18, 32, 52, 0.5);
+  stroke-width: 1.4px;
+  stroke-dasharray: 4 10;
+}
+
+.water-detail .water-ripple {
+  fill: none;
+  stroke-width: 1.6px;
+  stroke-linecap: round;
+}
+
+.water-detail,
+.field-detail {
+  pointer-events: none;
+}
+
+.field-detail .field-stripe {
+  stroke: none;
+
 }
 
 .pipeline-base,

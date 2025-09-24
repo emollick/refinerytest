@@ -424,9 +424,13 @@ class TileRenderer {
       node.fill.setAttribute("y", (node.baseY + node.maxHeight - height).toFixed(1));
     }
 
-    if (!this.panSession) {
+    if (!this.panSession && !this.camera.userControlled && this.mapBounds) {
+      const targetX = this.viewWidth / 2 - this.mapBounds.centerX * this.camera.zoom;
+      const targetY = this.viewHeight / 2 - this.mapBounds.centerY * this.camera.zoom;
       const beforeX = this.camera.offsetX;
       const beforeY = this.camera.offsetY;
+      this.camera.offsetX += (targetX - this.camera.offsetX) * 0.15;
+      this.camera.offsetY += (targetY - this.camera.offsetY) * 0.15;
       this._clampCamera();
       const changedX = Math.abs(beforeX - this.camera.offsetX) > 0.01;
       const changedY = Math.abs(beforeY - this.camera.offsetY) > 0.01;
@@ -493,12 +497,39 @@ class TileRenderer {
     for (let y = 0; y < this.mapRows; y += 1) {
       for (let x = 0; x < this.mapCols; x += 1) {
         const type = this.tiles[y][x];
-        const polygon = createSvgElement("polygon", {
-          class: `tile ${type}`,
-          points: pointsToString(this._tileDiamondPoints(x, y)),
+        const baseType = type.split("-")[0];
+        const points = this._tileDiamondPoints(x, y);
+        const group = createSvgElement("g", {
+          class: `tile tile-${baseType}`,
         });
-        this.layers.base.appendChild(polygon);
-        const tile = { polygon, type, x, y };
+        const base = createSvgElement("polygon", {
+          class: "tile-base",
+          points: pointsToString(points),
+        });
+        const highlight = createSvgElement("polygon", {
+          class: "tile-highlight",
+          points: pointsToString(this._tileHighlightPoints(points)),
+        });
+        highlight.setAttribute("stroke", "none");
+        const shadow = createSvgElement("polygon", {
+          class: "tile-shadow",
+          points: pointsToString(this._tileShadowPoints(points)),
+        });
+        shadow.setAttribute("stroke", "none");
+        group.appendChild(base);
+        group.appendChild(shadow);
+        group.appendChild(highlight);
+        this.layers.base.appendChild(group);
+        const tile = {
+          group,
+          base,
+          highlight,
+          shadow,
+          type,
+          baseType,
+          x,
+          y,
+        };
         const overlay = this._decorateTile(tile);
         if (overlay) {
           tile.overlay = overlay;
@@ -507,6 +538,33 @@ class TileRenderer {
       }
     }
     return nodes;
+  }
+
+  _tileHighlightPoints(points) {
+    const [top, right, bottom, left] = points;
+    const center = [
+      (top[0] + right[0] + bottom[0] + left[0]) / 4,
+      (top[1] + right[1] + bottom[1] + left[1]) / 4,
+    ];
+    const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+    return [
+      top,
+      lerp(top, right, 0.45),
+      center,
+      lerp(top, left, 0.45),
+    ];
+  }
+
+  _tileShadowPoints(points) {
+    const [top, right, bottom, left] = points;
+    const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+    return [
+      right,
+      lerp(right, bottom, 0.55),
+      bottom,
+      lerp(bottom, left, 0.4),
+      lerp(right, top, 0.25),
+    ];
   }
 
   _createGrid() {
@@ -597,6 +655,48 @@ class TileRenderer {
       });
       this.layers.decor.appendChild(polygon);
       return { node: polygon, type: "walkway" };
+    }
+    if (baseType === "water") {
+      const group = createSvgElement("g", { class: "water-detail" });
+      const crest = createSvgElement("polyline", {
+        class: "water-ripple",
+        points: pointsToString([
+          lerp(leftCorner, topCorner, 0.55),
+          lerp(topCorner, rightCorner, 0.5),
+          lerp(rightCorner, bottomCorner, 0.45),
+        ]),
+      });
+      const trough = createSvgElement("polyline", {
+        class: "water-ripple",
+        points: pointsToString([
+          lerp(leftCorner, bottomCorner, 0.65),
+          lerp(bottomCorner, rightCorner, 0.55),
+          lerp(rightCorner, topCorner, 0.6),
+        ]),
+      });
+      group.appendChild(crest);
+      group.appendChild(trough);
+      this.layers.decor.appendChild(group);
+      return { type: "water", ripples: [crest, trough] };
+    }
+    if (baseType === "field" || baseType === "fieldAlt") {
+      const group = createSvgElement("g", { class: "field-detail" });
+      const stripes = [];
+      for (let i = 1; i <= 3; i += 1) {
+        const stripe = createSvgElement("polygon", {
+          class: "field-stripe",
+          points: pointsToString([
+            lerp(leftCorner, topCorner, 0.15 * i),
+            lerp(rightCorner, topCorner, 0.18 * i + 0.15),
+            lerp(rightCorner, bottomCorner, 0.18 * i + 0.22),
+            lerp(leftCorner, bottomCorner, 0.15 * i + 0.2),
+          ]),
+        });
+        stripes.push(stripe);
+        group.appendChild(stripe);
+      }
+      this.layers.decor.appendChild(group);
+      return { type: "field", stripes };
     }
     return null;
   }
@@ -859,25 +959,49 @@ class TileRenderer {
   _applyPalette() {
     const palette = this.palettes[this.paletteIndex] || this.palettes[0];
     this.tileNodes.forEach((tile) => {
-      const color = palette[tile.type] || palette.pavement;
-      tile.polygon.setAttribute("fill", color);
-      tile.polygon.style.fill = color;
-      if (tile.overlay) {
-        const overlayColor = tile.overlay.type === "walkway" ? palette.walkway : palette.road;
-        if (overlayColor) {
-          if (tile.overlay.parts && tile.overlay.parts.length) {
-            tile.overlay.parts.forEach((part) => part.setAttribute("fill", overlayColor));
-          } else {
-            tile.overlay.node.setAttribute("fill", overlayColor);
-          }
+      const color = palette[tile.baseType] || palette.pavement;
+      tile.base.setAttribute("fill", color);
+      tile.base.setAttribute("stroke", palette.outline);
+      const highlightColor =
+        palette[`${tile.baseType}Highlight`] || lightenColor(color, tile.baseType === "water" ? 0.35 : 0.25);
+      const shadowColor =
+        palette[`${tile.baseType}Shadow`] || darkenColor(color, tile.baseType === "water" ? 0.25 : 0.35);
+      const highlightAlpha = tile.baseType === "water" ? 0.55 : 0.4;
+      const shadowAlpha = tile.baseType === "water" ? 0.4 : 0.55;
+      tile.highlight.setAttribute("fill", applyAlpha(highlightColor, highlightAlpha));
+      tile.shadow.setAttribute("fill", applyAlpha(shadowColor, shadowAlpha));
+
+      if (!tile.overlay) {
+        return;
+      }
+      if (tile.overlay.type === "walkway") {
+        const overlayColor = palette.walkway || lightenColor(color, 0.15);
+        tile.overlay.node.setAttribute("fill", overlayColor);
+      } else if (tile.overlay.type === "road") {
+        const surfaceColor = palette.road || darkenColor(color, 0.3);
+        if (tile.overlay.parts && tile.overlay.parts.length) {
+          tile.overlay.parts.forEach((part) => part.setAttribute("fill", surfaceColor));
+        } else if (tile.overlay.node) {
+          tile.overlay.node.setAttribute("fill", surfaceColor);
         }
-        if (palette.roadLine) {
-          if (tile.overlay.lines && tile.overlay.lines.length) {
-            tile.overlay.lines.forEach((line) => line.setAttribute("stroke", palette.roadLine));
-          } else if (tile.overlay.line) {
-            tile.overlay.line.setAttribute("stroke", palette.roadLine);
-          }
+        const lineColor = palette.roadLine || lightenColor(surfaceColor, 0.55);
+        if (tile.overlay.lines && tile.overlay.lines.length) {
+          tile.overlay.lines.forEach((line) => line.setAttribute("stroke", lineColor));
+        } else if (tile.overlay.line) {
+          tile.overlay.line.setAttribute("stroke", lineColor);
         }
+      } else if (tile.overlay.type === "water") {
+        const rippleColor = palette.waterHighlight || lightenColor(color, 0.45);
+        tile.overlay.ripples.forEach((ripple, index) => {
+          ripple.setAttribute("stroke", applyAlpha(rippleColor, index === 0 ? 0.7 : 0.45));
+        });
+      } else if (tile.overlay.type === "field") {
+        const bright = lightenColor(color, 0.28);
+        const dark = darkenColor(color, 0.15);
+        tile.overlay.stripes.forEach((stripe, index) => {
+          const mix = index % 2 === 0 ? bright : dark;
+          stripe.setAttribute("fill", applyAlpha(mix, 0.75));
+        });
       }
     });
     this.gridNodes.forEach((grid) => {
@@ -1278,6 +1402,31 @@ function applyAlpha(hexColor, alpha) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+function mixColor(baseHex, mixHex, amount) {
+  const clamp01 = (value) => Math.min(Math.max(value, 0), 1);
+  const a = clamp01(amount);
+  const base = baseHex.startsWith("#") ? baseHex.slice(1) : baseHex;
+  const mix = mixHex.startsWith("#") ? mixHex.slice(1) : mixHex;
+  const baseR = parseInt(base.slice(0, 2), 16);
+  const baseG = parseInt(base.slice(2, 4), 16);
+  const baseB = parseInt(base.slice(4, 6), 16);
+  const mixR = parseInt(mix.slice(0, 2), 16);
+  const mixG = parseInt(mix.slice(2, 4), 16);
+  const mixB = parseInt(mix.slice(4, 6), 16);
+  const r = Math.round(baseR + (mixR - baseR) * a);
+  const g = Math.round(baseG + (mixG - baseG) * a);
+  const b = Math.round(baseB + (mixB - baseB) * a);
+  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+}
+
+function lightenColor(baseHex, amount) {
+  return mixColor(baseHex, "#ffffff", amount);
+}
+
+function darkenColor(baseHex, amount) {
+  return mixColor(baseHex, "#000000", amount);
+}
+
 const renderer = new TileRenderer(sceneContainer, simulation, unitConfigs, pipelineConfigs);
 const surface = renderer.getSurface();
 
@@ -1443,9 +1592,8 @@ updateUnitButtons(null);
 ui.refreshControls();
 initializeMenus();
 updateMenuToggle(simulation.running);
-updateToggleButton(gridToggleButton, gridVisible, "Hide Grid Overlay", "Show Grid Overlay");
-updateToggleButton(flowToggleButton, flowOverlayVisible, "Hide Flow Glow", "Show Flow Glow");
-
+setGridVisibility(gridVisible);
+setFlowVisibility(flowOverlayVisible);
 populateScenarioMenu();
 populateUnitMenu();
 buildProcessLegend();
