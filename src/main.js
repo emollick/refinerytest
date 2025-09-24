@@ -1588,27 +1588,30 @@ class TileRenderer {
     return { offsetX, offsetY };
   }
 
-  _ensureCameraVisible() {
-    if (!this.mapBounds) {
-      return;
-    }
-    const { minX, maxX, minY, maxY } = this.mapBounds;
-    const { zoom, offsetX, offsetY } = this.camera;
-    const margin = 24;
-    const left = minX * zoom + offsetX;
-    const right = maxX * zoom + offsetX;
-    const top = minY * zoom + offsetY;
-    const bottom = maxY * zoom + offsetY;
-    if (
-      right < margin ||
-      left > this.viewWidth - margin ||
-      bottom < margin ||
-      top > this.viewHeight - margin
-    ) {
-      this.camera.userControlled = false;
-      this._fitCameraToView({ preserveZoom: true });
-    }
+_ensureCameraVisible() {
+  if (!this.mapBounds) {
+    return;
   }
+  const { minX, maxX, minY, maxY } = this.mapBounds;
+  const { zoom, offsetX, offsetY } = this.camera;
+  const margin = 24;
+  const left = minX * zoom + offsetX;
+  const right = maxX * zoom + offsetX;
+  const top = minY * zoom + offsetY;
+  const bottom = maxY * zoom + offsetY;
+  
+  // Add a small buffer to prevent constant triggering
+  const buffer = 2;
+  if (
+    right < margin - buffer ||
+    left > this.viewWidth - margin + buffer ||
+    bottom < margin - buffer ||
+    top > this.viewHeight - margin + buffer
+  ) {
+    this.camera.userControlled = false;
+    this._fitCameraToView({ preserveZoom: true });
+  }
+}
 
 _stabilizeCamera() {
   if (this.camera.userControlled) {
