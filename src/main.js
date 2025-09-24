@@ -1654,50 +1654,7 @@ _stabilizeCamera() {
     if (this._clampCamera()) {
       this._updateCameraTransform();
     }
-    return;
-  }
-  
-  // Check if we're already at the home position
-  const atHome = 
-    Math.abs(this.camera.offsetX - this.camera.homeOffsetX) < 0.01 &&
-    Math.abs(this.camera.offsetY - this.camera.homeOffsetY) < 0.01 &&
-    Math.abs(this.camera.zoom - this.camera.homeZoom) < 0.0001;
-  
-  if (atHome) {
-    // Already at home, ensure exact values and don't update
-    this.camera.offsetX = this.camera.homeOffsetX;
-    this.camera.offsetY = this.camera.homeOffsetY;
-    this.camera.zoom = this.camera.homeZoom;
-    return;
-  }
-  
-  // We need to move toward home
-  const deltaX = this.camera.homeOffsetX - this.camera.offsetX;
-  const deltaY = this.camera.homeOffsetY - this.camera.offsetY;
-  const deltaZoom = this.camera.homeZoom - this.camera.zoom;
-  
-  // Snap when very close
-  if (Math.abs(deltaX) < 1) {
-    this.camera.offsetX = this.camera.homeOffsetX;
-  } else {
-    this.camera.offsetX += deltaX * 0.15;
-  }
-  
-  if (Math.abs(deltaY) < 1) {
-    this.camera.offsetY = this.camera.homeOffsetY;
-  } else {
-    this.camera.offsetY += deltaY * 0.15;
-  }
-  
-  if (Math.abs(deltaZoom) < 0.01) {
-    this.camera.zoom = this.camera.homeZoom;
-  } else {
-    this.camera.zoom += deltaZoom * 0.15;
-  }
-  
-  this._updateCameraTransform();
-}
-  
+
 beginPan(screenX, screenY) {
   // Stop any animation and lock current position
   this.camera.offsetX = Math.round(this.camera.offsetX * 100) / 100;
