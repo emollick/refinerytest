@@ -1654,32 +1654,51 @@ _stabilizeCamera() {
     if (this._clampCamera()) {
       this._updateCameraTransform();
     }
-
-beginPan(screenX, screenY) {
-  // Stop any animation and lock current position
-  this.camera.offsetX = Math.round(this.camera.offsetX * 100) / 100;
-  this.camera.offsetY = Math.round(this.camera.offsetY * 100) / 100;
+    return;
+  }
   
-  this.panSession = {
-    startX: screenX,
-    startY: screenY,
-    baseOffsetX: this.camera.offsetX,
-    baseOffsetY: this.camera.offsetY,
-  };
-  this.camera.userControlled = true;
+  // Check if we're already at the home position
+  const atHome = 
+    Math.abs(this.camera.offsetX - this.camera.homeOffsetX) < 0.01 &&
+    Math.abs(this.camera.offsetY - this.camera.homeOffsetY) < 0.01 &&
+    Math.abs(this.camera.zoom - this.camera.homeZoom) < 0.0001;
+  
+  if (atHome) {
+    // Already at home, ensure exact values and don't update
+    this.camera.offsetX = this.camera.homeOffsetX;
+    this.camera.offsetY = this.camera.homeOffsetY;
+    this.camera.zoom = this.camera.homeZoom;
+    return;
+  }
+  
+  // We need to move toward home
+  const deltaX = this.camera.homeOffsetX - this.camera.offsetX;
+  const deltaY = this.camera.homeOffsetY - this.camera.offsetY;
+  const deltaZoom = this.camera.homeZoom - this.camera.zoom;
+  
+  // Snap when very close
+  if (Math.abs(deltaX) < 1) {
+    this.camera.offsetX = this.camera.homeOffsetX;
+  } else {
+    this.camera.offsetX += deltaX * 0.15;
+  }
+  
+  if (Math.abs(deltaY) < 1) {
+    this.camera.offsetY = this.camera.homeOffsetY;
+  } else {
+    this.camera.offsetY += deltaY * 0.15;
+  }
+  
+  if (Math.abs(deltaZoom) < 0.01) {
+    this.camera.zoom = this.camera.homeZoom;
+  } else {
+    this.camera.zoom += deltaZoom * 0.15;
+  }
+  
+  this._updateCameraTransform();
 }
 
-  panTo(screenX, screenY) {
-    if (!this.panSession) {
-      return;
-    }
-    const dx = screenX - this.panSession.startX;
-    const dy = screenY - this.panSession.startY;
-    this.camera.offsetX = this.panSession.baseOffsetX + dx;
-    this.camera.offsetY = this.panSession.baseOffsetY + dy;
-    this._clampCamera();
-    this._updateCameraTransform();
-  }
+beginPan(screenX, screenY) {
 
   endPan() {
     this.panSession = null;
