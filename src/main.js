@@ -213,18 +213,18 @@ class TileRenderer {
 
     this.palettes = [
       {
-        pavement: "#c7c0ae",
-        pavementShadow: "#8f8774",
-        water: "#1e3358",
-        waterHighlight: "#2c4b7e",
-        shore: "#345168",
-        grass: "#7aa471",
-        green: "#76a08c",
-        field: "#a37a41",
-        fieldAlt: "#c99c50",
-        road: "#3f465c",
-        roadLine: "#dcd4a4",
-        walkway: "#bfa98b",
+        pavement: "#c8b79c",
+        pavementShadow: "#8b785f",
+        water: "#1d3b63",
+        waterHighlight: "#2e5a87",
+        shore: "#365b74",
+        grass: "#7fb368",
+        green: "#6fa793",
+        field: "#b0823c",
+        fieldAlt: "#d3a754",
+        road: "#3c465c",
+        roadLine: "#f0ddb1",
+        walkway: "#c4af8a",
         grid: "rgba(32, 40, 54, 0.4)",
         outline: "#1c1d20",
         pipeBase: "#76aee8",
@@ -232,18 +232,18 @@ class TileRenderer {
         labelBg: "rgba(12, 16, 22, 0.6)",
       },
       {
-        pavement: "#b5bcc8",
-        pavementShadow: "#88909f",
-        water: "#142a44",
-        waterHighlight: "#1e3f63",
-        shore: "#2f4663",
-        grass: "#6b8f67",
-        green: "#6b9aa2",
-        field: "#996a33",
-        fieldAlt: "#bf8c3c",
-        road: "#3a4255",
-        roadLine: "#e2dcae",
-        walkway: "#b69f82",
+        pavement: "#b5becb",
+        pavementShadow: "#8792a2",
+        water: "#16314e",
+        waterHighlight: "#254a72",
+        shore: "#314d6b",
+        grass: "#6b9463",
+        green: "#6fa0a9",
+        field: "#9d7134",
+        fieldAlt: "#c48a3d",
+        road: "#3a4357",
+        roadLine: "#e7deb4",
+        walkway: "#bca27f",
         grid: "rgba(20, 32, 48, 0.42)",
         outline: "#16171c",
         pipeBase: "#8ec8ff",
@@ -425,18 +425,6 @@ class TileRenderer {
       node.fill.setAttribute("y", (node.baseY + node.maxHeight - height).toFixed(1));
     }
 
-    if (!this.panSession && !this.camera.userControlled && this.mapBounds) {
-      const targetX = this.viewWidth / 2 - this.mapBounds.centerX * this.camera.zoom;
-      const targetY = this.viewHeight / 2 - this.mapBounds.centerY * this.camera.zoom;
-      const changedX = Math.abs(targetX - this.camera.offsetX) > 0.01;
-      const changedY = Math.abs(targetY - this.camera.offsetY) > 0.01;
-      if (changedX || changedY) {
-        this.camera.offsetX = targetX;
-        this.camera.offsetY = targetY;
-        this._clampCamera();
-        this._updateCameraTransform();
-      }
-    }
   }
 
   screenToIso(clientX, clientY) {
@@ -501,6 +489,20 @@ class TileRenderer {
         const group = createSvgElement("g", {
           class: `tile tile-${baseType}`,
         });
+        let leftSide = null;
+        let rightSide = null;
+        if (baseType !== "water" && baseType !== "shore") {
+          leftSide = createSvgElement("polygon", {
+            class: "tile-side tile-side-left",
+            points: pointsToString(this._tileSidePoints(points, "left")),
+          });
+          rightSide = createSvgElement("polygon", {
+            class: "tile-side tile-side-right",
+            points: pointsToString(this._tileSidePoints(points, "right")),
+          });
+          group.appendChild(leftSide);
+          group.appendChild(rightSide);
+        }
         const base = createSvgElement("polygon", {
           class: "tile-base",
           points: pointsToString(points),
@@ -524,6 +526,8 @@ class TileRenderer {
           base,
           highlight,
           shadow,
+          leftSide,
+          rightSide,
           type,
           baseType,
           x,
@@ -566,6 +570,24 @@ class TileRenderer {
     ];
   }
 
+  _tileSidePoints(points, side) {
+    const [, right, bottom, left] = points;
+    const drop = this.tileHeight * 0.6;
+    if (side === "left") {
+      return [
+        left,
+        bottom,
+        [bottom[0], bottom[1] + drop],
+        [left[0], left[1] + drop],
+      ];
+    }
+    return [
+      right,
+      bottom,
+      [bottom[0], bottom[1] + drop],
+      [right[0], right[1] + drop],
+    ];
+  }
   _createGrid() {
     const nodes = [];
     for (let y = 0; y < this.mapRows; y += 1) {
@@ -663,9 +685,33 @@ class TileRenderer {
         points: pointsToString(outline),
       });
       group.appendChild(surface);
+      const stripeOffsets = [0.33, 0.66];
+      const stripes = stripeOffsets.map((offset) => {
+        const start = lerp(points[1], points[2], offset);
+        const end = lerp(points[0], points[3], offset);
+        const stripe = createSvgElement("line", {
+          class: "walkway-stripe",
+          x1: start[0].toFixed(1),
+          y1: start[1].toFixed(1),
+          x2: end[0].toFixed(1),
+          y2: end[1].toFixed(1),
+        });
+        group.appendChild(stripe);
+        return stripe;
+      });
+      const posts = points.map((corner) => {
+        const post = createSvgElement("circle", {
+          class: "walkway-post",
+          cx: corner[0].toFixed(1),
+          cy: corner[1].toFixed(1),
+          r: 2.2,
+        });
+        group.appendChild(post);
+        return post;
+      });
       group.appendChild(border);
       this.layers.decor.appendChild(group);
-      return { node: surface, group, surface, border, type: "walkway" };
+      return { node: surface, group, surface, border, stripes, posts, type: "walkway" };
     }
     if (baseType === "water") {
       const group = createSvgElement("g", { class: "water-detail" });
@@ -1305,6 +1351,16 @@ class TileRenderer {
       const shadowAlpha = tile.baseType === "water" ? 0.4 : 0.55;
       tile.highlight.setAttribute("fill", applyAlpha(highlightColor, highlightAlpha));
       tile.shadow.setAttribute("fill", applyAlpha(shadowColor, shadowAlpha));
+      if (tile.leftSide) {
+        const leftTone = applyAlpha(lightenColor(color, 0.18), 0.92);
+        tile.leftSide.setAttribute("fill", leftTone);
+        tile.leftSide.setAttribute("stroke", applyAlpha(darkenColor(color, 0.5), 0.8));
+      }
+      if (tile.rightSide) {
+        const rightTone = applyAlpha(darkenColor(color, 0.48), 0.94);
+        tile.rightSide.setAttribute("fill", rightTone);
+        tile.rightSide.setAttribute("stroke", applyAlpha(darkenColor(color, 0.65), 0.85));
+      }
 
       if (!tile.overlay) {
         return;
@@ -1317,6 +1373,18 @@ class TileRenderer {
         if (tile.overlay.border) {
           const borderColor = applyAlpha(darkenColor(overlayColor, 0.35), 0.75);
           tile.overlay.border.setAttribute("stroke", borderColor);
+        }
+        if (tile.overlay.stripes) {
+          const stripeColor = applyAlpha(darkenColor(overlayColor, 0.45), 0.8);
+          tile.overlay.stripes.forEach((stripe) => stripe.setAttribute("stroke", stripeColor));
+        }
+        if (tile.overlay.posts) {
+          const postFill = applyAlpha(lightenColor(overlayColor, 0.35), 0.9);
+          const postStroke = applyAlpha(darkenColor(overlayColor, 0.5), 0.85);
+          tile.overlay.posts.forEach((post) => {
+            post.setAttribute("fill", postFill);
+            post.setAttribute("stroke", postStroke);
+          });
         }
       } else if (tile.overlay.type === "road") {
         const surfaceColor = palette.road || darkenColor(color, 0.3);
@@ -1452,6 +1520,9 @@ class TileRenderer {
     const offsetY = this.viewHeight / 2 - this.mapBounds.centerY * this.camera.zoom;
     this.camera.offsetX = offsetX;
     this.camera.offsetY = offsetY;
+    this.camera.homeOffsetX = offsetX;
+    this.camera.homeOffsetY = offsetY;
+    this.camera.homeZoom = this.camera.zoom;
     this._clampCamera();
     this._updateCameraTransform();
   }

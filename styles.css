@@ -357,6 +357,13 @@ body {
   mix-blend-mode: multiply;
 }
 
+.tile-layer .tile-side {
+  pointer-events: none;
+  stroke-width: 1px;
+  stroke-linejoin: round;
+  opacity: 0.95;
+}
+
 .road-surface,
 .road-surface .road-part {
   pointer-events: none;
@@ -385,6 +392,15 @@ body {
   stroke-linecap: round;
   stroke-linejoin: round;
   opacity: 0.65;
+}
+
+.walkway-detail .walkway-stripe {
+  stroke-width: 1.4px;
+  stroke-linecap: round;
+}
+
+.walkway-detail .walkway-post {
+  stroke-width: 0.9px;
 }
 
 .road-centerline {
@@ -510,7 +526,6 @@ body {
 .unit-highlight {
   fill: none;
   stroke: rgba(255, 244, 180, 0.45);
-
   stroke-width: 4px;
   stroke-linejoin: round;
 }
@@ -518,7 +533,6 @@ body {
 .unit-detail {
   stroke-linejoin: round;
   fill-opacity: 0.92;
-
 }
 
 .unit-label {
