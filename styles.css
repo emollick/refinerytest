@@ -340,7 +340,6 @@ body {
   display: none;
 }
 
-
 .tile-layer .tile-base {
   stroke: rgba(16, 24, 36, 0.55);
   stroke-width: 1.2px;
@@ -369,11 +368,22 @@ body {
   stroke-width: 1.2px;
 }
 
-.walkway {
+.walkway-detail {
   pointer-events: none;
-  stroke: rgba(30, 24, 18, 0.4);
-  stroke-width: 1px;
-  opacity: 0.9;
+}
+
+.walkway-detail .walkway-fill {
+  stroke: rgba(30, 24, 18, 0.35);
+  stroke-width: 1.1px;
+  opacity: 0.92;
+}
+
+.walkway-detail .walkway-border {
+  fill: none;
+  stroke-width: 1.1px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.65;
 }
 
 .road-centerline {
@@ -386,7 +396,6 @@ body {
 
 .tile-layer.grid .grid-line {
   fill: none;
-
   stroke: rgba(18, 32, 52, 0.5);
   stroke-width: 1.4px;
   stroke-dasharray: 4 10;
@@ -403,9 +412,54 @@ body {
   pointer-events: none;
 }
 
+.shore-detail {
+  pointer-events: none;
+}
+
+.shore-detail .shore-foam {
+  fill: none;
+  stroke-width: 1.8px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 7 9;
+}
+
 .field-detail .field-stripe {
   stroke: none;
+}
 
+.pavement-detail {
+  pointer-events: none;
+}
+
+.pavement-detail .pavement-bevel {
+  stroke: none;
+}
+
+.pavement-detail .pavement-seam {
+  fill: none;
+  stroke-width: 1.2px;
+  stroke-linecap: round;
+  stroke-dasharray: 6 8;
+}
+
+.pavement-detail .pavement-crack {
+  fill: none;
+  stroke-width: 1px;
+  stroke-linecap: round;
+  stroke-dasharray: 2 6;
+}
+
+.grass-detail {
+  pointer-events: none;
+}
+
+.grass-detail .grass-shadow {
+  stroke: none;
+}
+
+.grass-detail .grass-tuft {
+  stroke: none;
 }
 
 .pipeline-base,

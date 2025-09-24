@@ -187,7 +187,8 @@ class TileRenderer {
     this.mapRows = 12;
     this.viewWidth = 1180;
     this.viewHeight = 760;
-    this.originX = this.viewWidth / 2;
+    this.originX =
+      this.viewWidth / 2 - ((this.mapCols - this.mapRows) * this.tileWidth) / 4;
     this.originY = 150;
     this.time = 0;
     this.selectionFlash = 0;
@@ -586,6 +587,10 @@ class TileRenderer {
     const [baseType, orientation] = tile.type.split("-");
     const corners = this._tileDiamondPoints(tile.x, tile.y);
     const [topCorner, rightCorner, bottomCorner, leftCorner] = corners;
+    const center = [
+      (topCorner[0] + rightCorner[0] + bottomCorner[0] + leftCorner[0]) / 4,
+      (topCorner[1] + rightCorner[1] + bottomCorner[1] + leftCorner[1]) / 4,
+    ];
     const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
     if (baseType === "road") {
       const dir = orientation || "ew";
@@ -649,12 +654,20 @@ class TileRenderer {
         lerp(corners[2], corners[3], 0.6),
         lerp(corners[2], corners[1], 0.6),
       ];
-      const polygon = createSvgElement("polygon", {
-        class: "walkway",
+      const outline = [...points, points[0]];
+      const group = createSvgElement("g", { class: "walkway-detail" });
+      const surface = createSvgElement("polygon", {
+        class: "walkway-fill",
         points: pointsToString(points),
       });
-      this.layers.decor.appendChild(polygon);
-      return { node: polygon, type: "walkway" };
+      const border = createSvgElement("polyline", {
+        class: "walkway-border",
+        points: pointsToString(outline),
+      });
+      group.appendChild(surface);
+      group.appendChild(border);
+      this.layers.decor.appendChild(group);
+      return { node: surface, group, surface, border, type: "walkway" };
     }
     if (baseType === "water") {
       const group = createSvgElement("g", { class: "water-detail" });
@@ -666,6 +679,14 @@ class TileRenderer {
           lerp(rightCorner, bottomCorner, 0.45),
         ]),
       });
+      const mid = createSvgElement("polyline", {
+        class: "water-ripple",
+        points: pointsToString([
+          lerp(leftCorner, topCorner, 0.35),
+          lerp(topCorner, rightCorner, 0.32),
+          lerp(rightCorner, bottomCorner, 0.32),
+        ]),
+      });
       const trough = createSvgElement("polyline", {
         class: "water-ripple",
         points: pointsToString([
@@ -675,9 +696,10 @@ class TileRenderer {
         ]),
       });
       group.appendChild(crest);
+      group.appendChild(mid);
       group.appendChild(trough);
       this.layers.decor.appendChild(group);
-      return { type: "water", ripples: [crest, trough] };
+      return { type: "water", ripples: [crest, mid, trough] };
     }
     if (baseType === "field" || baseType === "fieldAlt") {
       const group = createSvgElement("g", { class: "field-detail" });
@@ -697,6 +719,96 @@ class TileRenderer {
       }
       this.layers.decor.appendChild(group);
       return { type: "field", stripes };
+    }
+    if (baseType === "shore") {
+      const group = createSvgElement("g", { class: "shore-detail" });
+      const foam = createSvgElement("polyline", {
+        class: "shore-foam",
+        points: pointsToString([
+          lerp(leftCorner, topCorner, 0.22),
+          lerp(topCorner, rightCorner, 0.38),
+          lerp(rightCorner, bottomCorner, 0.28),
+          lerp(center, bottomCorner, 0.35),
+        ]),
+      });
+      group.appendChild(foam);
+      this.layers.decor.appendChild(group);
+      return { type: "shoreDetail", foam };
+    }
+    if (baseType === "pavement") {
+      const group = createSvgElement("g", { class: "pavement-detail" });
+      const highlight = createSvgElement("polygon", {
+        class: "pavement-bevel highlight",
+        points: pointsToString([
+          lerp(topCorner, leftCorner, 0.08),
+          lerp(topCorner, rightCorner, 0.08),
+          lerp(center, rightCorner, 0.24),
+          lerp(center, leftCorner, 0.24),
+        ]),
+      });
+      const shadow = createSvgElement("polygon", {
+        class: "pavement-bevel shadow",
+        points: pointsToString([
+          lerp(center, rightCorner, 0.28),
+          lerp(bottomCorner, rightCorner, 0.12),
+          lerp(bottomCorner, leftCorner, 0.12),
+          lerp(center, leftCorner, 0.28),
+        ]),
+      });
+      const seam = createSvgElement("polyline", {
+        class: "pavement-seam",
+        points: pointsToString([
+          lerp(leftCorner, bottomCorner, 0.32),
+          lerp(center, bottomCorner, 0.2),
+          lerp(rightCorner, topCorner, 0.62),
+        ]),
+      });
+      const crack = createSvgElement("polyline", {
+        class: "pavement-crack",
+        points: pointsToString([
+          lerp(center, rightCorner, 0.18),
+          lerp(center, bottomCorner, 0.28),
+        ]),
+      });
+      group.appendChild(shadow);
+      group.appendChild(highlight);
+      group.appendChild(seam);
+      group.appendChild(crack);
+      this.layers.decor.appendChild(group);
+      return { type: "pavementDetail", highlight, shadow, seam, crack };
+    }
+    if (baseType === "grass" || baseType === "green") {
+      const group = createSvgElement("g", { class: "grass-detail" });
+      const shadow = createSvgElement("polygon", {
+        class: "grass-shadow",
+        points: pointsToString([
+          lerp(center, leftCorner, 0.32),
+          lerp(center, rightCorner, 0.32),
+          lerp(center, bottomCorner, 0.42),
+          lerp(center, bottomCorner, 0.58),
+        ]),
+      });
+      group.appendChild(shadow);
+      const tuftOffsets = [
+        center,
+        lerp(center, leftCorner, 0.16),
+        lerp(center, rightCorner, 0.2),
+      ];
+      const tufts = tuftOffsets.map((base) => {
+        const tuft = createSvgElement("polygon", {
+          class: "grass-tuft",
+          points: pointsToString([
+            lerp(base, topCorner, 0.3),
+            lerp(base, rightCorner, 0.22),
+            lerp(base, bottomCorner, 0.3),
+            lerp(base, leftCorner, 0.22),
+          ]),
+        });
+        group.appendChild(tuft);
+        return tuft;
+      });
+      this.layers.decor.appendChild(group);
+      return { type: "grassDetail", shadow, tufts };
     }
     return null;
   }
@@ -976,7 +1088,13 @@ class TileRenderer {
       }
       if (tile.overlay.type === "walkway") {
         const overlayColor = palette.walkway || lightenColor(color, 0.15);
-        tile.overlay.node.setAttribute("fill", overlayColor);
+        if (tile.overlay.surface) {
+          tile.overlay.surface.setAttribute("fill", overlayColor);
+        }
+        if (tile.overlay.border) {
+          const borderColor = applyAlpha(darkenColor(overlayColor, 0.35), 0.75);
+          tile.overlay.border.setAttribute("stroke", borderColor);
+        }
       } else if (tile.overlay.type === "road") {
         const surfaceColor = palette.road || darkenColor(color, 0.3);
         if (tile.overlay.parts && tile.overlay.parts.length) {
@@ -992,8 +1110,10 @@ class TileRenderer {
         }
       } else if (tile.overlay.type === "water") {
         const rippleColor = palette.waterHighlight || lightenColor(color, 0.45);
+        const rippleAlphas = [0.68, 0.52, 0.32];
         tile.overlay.ripples.forEach((ripple, index) => {
-          ripple.setAttribute("stroke", applyAlpha(rippleColor, index === 0 ? 0.7 : 0.45));
+          const alpha = rippleAlphas[index] ?? 0.4;
+          ripple.setAttribute("stroke", applyAlpha(rippleColor, alpha));
         });
       } else if (tile.overlay.type === "field") {
         const bright = lightenColor(color, 0.28);
@@ -1001,6 +1121,25 @@ class TileRenderer {
         tile.overlay.stripes.forEach((stripe, index) => {
           const mix = index % 2 === 0 ? bright : dark;
           stripe.setAttribute("fill", applyAlpha(mix, 0.75));
+        });
+      } else if (tile.overlay.type === "shoreDetail") {
+        const foamColor = lightenColor(palette.waterHighlight || palette.water, 0.25);
+        tile.overlay.foam.setAttribute("stroke", applyAlpha(foamColor, 0.7));
+      } else if (tile.overlay.type === "pavementDetail") {
+        const highlightTone = lightenColor(color, 0.35);
+        const shadowTone = darkenColor(color, 0.35);
+        tile.overlay.highlight.setAttribute("fill", applyAlpha(highlightTone, 0.55));
+        tile.overlay.shadow.setAttribute("fill", applyAlpha(shadowTone, 0.55));
+        const seamColor = darkenColor(color, 0.45);
+        tile.overlay.seam.setAttribute("stroke", applyAlpha(seamColor, 0.7));
+        tile.overlay.crack.setAttribute("stroke", applyAlpha(darkenColor(color, 0.55), 0.65));
+      } else if (tile.overlay.type === "grassDetail") {
+        const baseTone = palette[tile.baseType] || color;
+        const shadowTone = darkenColor(baseTone, 0.35);
+        tile.overlay.shadow.setAttribute("fill", applyAlpha(shadowTone, 0.35));
+        tile.overlay.tufts.forEach((tuft, index) => {
+          const tint = index % 2 === 0 ? lightenColor(baseTone, 0.3) : lightenColor(baseTone, 0.18);
+          tuft.setAttribute("fill", applyAlpha(tint, 0.85));
         });
       }
     });
