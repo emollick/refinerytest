@@ -261,6 +261,7 @@ class TileRenderer {
       "aria-hidden": "true",
     });
     this.container.appendChild(this.svg);
+
     this.worldGroup = createSvgElement("g", { class: "map-world" });
     this.svg.appendChild(this.worldGroup);
 
@@ -422,6 +423,17 @@ class TileRenderer {
       node.fill.setAttribute("height", height.toFixed(1));
       node.fill.setAttribute("y", (node.baseY + node.maxHeight - height).toFixed(1));
     }
+
+    if (!this.panSession) {
+      const beforeX = this.camera.offsetX;
+      const beforeY = this.camera.offsetY;
+      this._clampCamera();
+      const changedX = Math.abs(beforeX - this.camera.offsetX) > 0.01;
+      const changedY = Math.abs(beforeY - this.camera.offsetY) > 0.01;
+      if (changedX || changedY) {
+        this._updateCameraTransform();
+      }
+    }
   }
 
   screenToIso(clientX, clientY) {
@@ -453,6 +465,21 @@ class TileRenderer {
 
   getSurfaceBounds() {
     return this.svg.getBoundingClientRect();
+  }
+
+  nudgeCamera(deltaX, deltaY) {
+    if (!Number.isFinite(deltaX) && !Number.isFinite(deltaY)) {
+      return;
+    }
+    if (Number.isFinite(deltaX)) {
+      this.camera.offsetX += deltaX;
+    }
+    if (Number.isFinite(deltaY)) {
+      this.camera.offsetY += deltaY;
+    }
+    this.camera.userControlled = true;
+    this._clampCamera();
+    this._updateCameraTransform();
   }
 
   _createLayer(className) {
@@ -948,37 +975,27 @@ class TileRenderer {
     const { zoom } = this.camera;
     let { offsetX, offsetY } = this.camera;
     const margin = 48;
-    const left = minX * zoom + offsetX;
-    const right = maxX * zoom + offsetX;
-    const top = minY * zoom + offsetY;
-    const bottom = maxY * zoom + offsetY;
     const width = this.viewWidth;
     const height = this.viewHeight;
+    const mapWidth = (maxX - minX) * zoom;
+    const mapHeight = (maxY - minY) * zoom;
+    const effectiveMarginX = Math.min(margin, Math.max((width - mapWidth) / 2, 0));
+    const effectiveMarginY = Math.min(margin, Math.max((height - mapHeight) / 2, 0));
 
-    if (right - left < width - margin * 2) {
-      const mid = (left + right) / 2;
-      const desired = width / 2;
-      offsetX += desired - mid;
+    const minOffsetX = effectiveMarginX - minX * zoom;
+    const maxOffsetX = width - effectiveMarginX - maxX * zoom;
+    if (minOffsetX <= maxOffsetX) {
+      offsetX = clamp(offsetX, minOffsetX, maxOffsetX);
     } else {
-      if (left > margin) {
-        offsetX -= left - margin;
-      }
-      if (right < width - margin) {
-        offsetX += width - margin - right;
-      }
+      offsetX = (minOffsetX + maxOffsetX) / 2;
     }
 
-    if (bottom - top < height - margin * 2) {
-      const mid = (top + bottom) / 2;
-      const desired = height / 2;
-      offsetY += desired - mid;
+    const minOffsetY = effectiveMarginY - minY * zoom;
+    const maxOffsetY = height - effectiveMarginY - maxY * zoom;
+    if (minOffsetY <= maxOffsetY) {
+      offsetY = clamp(offsetY, minOffsetY, maxOffsetY);
     } else {
-      if (top > margin) {
-        offsetY -= top - margin;
-      }
-      if (bottom < height - margin) {
-        offsetY += height - margin - bottom;
-      }
+      offsetY = (minOffsetY + maxOffsetY) / 2;
     }
 
     this.camera.offsetX = offsetX;
@@ -1544,12 +1561,38 @@ surface.addEventListener(
     const rect = surface.getBoundingClientRect();
     const pointerX = (event.clientX - rect.left) * renderer.deviceScaleX;
     const pointerY = (event.clientY - rect.top) * renderer.deviceScaleY;
-    renderer.zoomAt(pointerX, pointerY, event.deltaY);
+    const panIntent = event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY) * 0.75;
+    if (panIntent) {
+      let deltaX = event.deltaX;
+      let deltaY = event.deltaY;
+      const DOM_DELTA_LINE = typeof WheelEvent !== "undefined" ? WheelEvent.DOM_DELTA_LINE : 1;
+      const DOM_DELTA_PAGE = typeof WheelEvent !== "undefined" ? WheelEvent.DOM_DELTA_PAGE : 2;
+      if (event.deltaMode === DOM_DELTA_LINE) {
+        deltaX *= 32;
+        deltaY *= 32;
+      } else if (event.deltaMode === DOM_DELTA_PAGE) {
+        deltaX *= surface.clientWidth || 1;
+        deltaY *= surface.clientHeight || 1;
+      }
+      deltaX = -deltaX * renderer.deviceScaleX;
+      deltaY = -deltaY * renderer.deviceScaleY;
+      renderer.nudgeCamera(deltaX, deltaY);
+    } else {
+      renderer.zoomAt(pointerX, pointerY, event.deltaY);
+    }
   },
   { passive: false }
 );
 
+surface.addEventListener("dblclick", (event) => {
+  event.preventDefault();
+  renderer.resetView();
+});
+
 surface.addEventListener("click", (event) => {
+  if (event.detail > 1) {
+    return;
+  }
   if (panMoved) {
     panMoved = false;
     return;
