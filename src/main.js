@@ -334,13 +334,6 @@ resizeToContainer(container) {
   // Just update transform without recalculating position
   this._updateCameraTransform();
 }
-}
-} else {
-  const clamped = this._clampCamera();
-  if (clamped) {
-    this._updateCameraTransform();
-  }
-}
   }
 
   setGridVisible(visible) {
