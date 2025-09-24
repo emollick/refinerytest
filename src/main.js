@@ -302,11 +302,26 @@ resizeToContainer(container) {
   const width = Math.max(720, Math.floor(rect.width));
   const height = Math.max(480, Math.floor(rect.height));
   
-  // Check if dimensions actually changed
-  if (this.displayWidth === width && this.displayHeight === height) {
-    return; // No change, don't recalculate
+  // Store initial setup flag
+  if (!this.initialSetupDone) {
+    this.initialSetupDone = true;
+    this.svg.setAttribute("width", width);
+    this.svg.setAttribute("height", height);
+    this.svg.style.width = `${width}px`;
+    this.svg.style.height = `${height}px`;
+    this.deviceScaleX = this.viewWidth / width;
+    this.deviceScaleY = this.viewHeight / height;
+    this.displayWidth = width;
+    this.displayHeight = height;
+    
+    // Only fit camera on first setup
+    if (!this.camera.userControlled) {
+      this._fitCameraToView({ preserveZoom: true });
+    }
+    return;
   }
   
+  // On subsequent resizes, just update the SVG size but don't touch camera
   this.svg.setAttribute("width", width);
   this.svg.setAttribute("height", height);
   this.svg.style.width = `${width}px`;
@@ -316,8 +331,9 @@ resizeToContainer(container) {
   this.displayWidth = width;
   this.displayHeight = height;
   
-  // Don't recalculate camera position, just update the transform
+  // Just update transform without recalculating position
   this._updateCameraTransform();
+}
 }
 } else {
   const clamped = this._clampCamera();
