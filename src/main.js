@@ -458,14 +458,32 @@ class TileRenderer {
 resetView() {
   this.pointer.active = false;
   this.camera.userControlled = false;
-  this._fitCameraToView({ preserveZoom: false });
-  // Round to prevent floating point drift
-  this.camera.homeOffsetX = Math.round(this.camera.homeOffsetX * 100) / 100;
-  this.camera.homeOffsetY = Math.round(this.camera.homeOffsetY * 100) / 100;
-  this.camera.homeZoom = Math.round(this.camera.homeZoom * 10000) / 10000;
+  
+  // Calculate the proper centered view
+  if (!this.mapBounds) {
+    this.mapBounds = this._calculateMapBounds();
+  }
+  
+  const marginX = 160;
+  const marginY = 140;
+  const availableWidth = this.viewWidth - marginX;
+  const availableHeight = this.viewHeight - marginY;
+  
+  const scaleX = availableWidth / Math.max(1, this.mapBounds.width);
+  const scaleY = availableHeight / Math.max(1, this.mapBounds.height);
+  const targetZoom = clamp(Math.min(scaleX, scaleY), this.camera.minZoom, this.camera.maxZoom);
+  
+  // Set exact home positions
+  this.camera.homeZoom = targetZoom;
+  const centered = this._centeredOffsets(targetZoom);
+  this.camera.homeOffsetX = Math.round(centered.offsetX * 100) / 100;
+  this.camera.homeOffsetY = Math.round(centered.offsetY * 100) / 100;
+  
+  // Set current to home immediately for reset
+  this.camera.zoom = this.camera.homeZoom;
   this.camera.offsetX = this.camera.homeOffsetX;
   this.camera.offsetY = this.camera.homeOffsetY;
-  this.camera.zoom = this.camera.homeZoom;
+  
   this._updateCameraTransform();
 }
 
@@ -1517,31 +1535,41 @@ resetView() {
     };
   }
 
-  _fitCameraToView({ preserveZoom = false } = {}) {
-    if (!this.mapBounds) {
-      return;
-    }
-    const marginX = 160;
-    const marginY = 140;
-    const availableWidth = this.viewWidth - marginX;
-    const availableHeight = this.viewHeight - marginY;
-    if (!preserveZoom) {
-      const scaleX = availableWidth / Math.max(1, this.mapBounds.width);
-      const scaleY = availableHeight / Math.max(1, this.mapBounds.height);
-      const targetZoom = clamp(Math.min(scaleX, scaleY), this.camera.minZoom, this.camera.maxZoom);
-      this.camera.zoom = targetZoom;
-    } else {
-      this.camera.zoom = clamp(this.camera.zoom, this.camera.minZoom, this.camera.maxZoom);
-    }
-    const centered = this._centeredOffsets(this.camera.zoom);
-    this.camera.offsetX = centered.offsetX;
-    this.camera.offsetY = centered.offsetY;
-    this._clampCamera();
-    this.camera.homeOffsetX = this.camera.offsetX;
-    this.camera.homeOffsetY = this.camera.offsetY;
-    this.camera.homeZoom = this.camera.zoom;
-    this._updateCameraTransform();
+_fitCameraToView({ preserveZoom = false } = {}) {
+  if (!this.mapBounds) {
+    return;
   }
+  const marginX = 160;
+  const marginY = 140;
+  const availableWidth = this.viewWidth - marginX;
+  const availableHeight = this.viewHeight - marginY;
+  
+  if (!preserveZoom) {
+    const scaleX = availableWidth / Math.max(1, this.mapBounds.width);
+    const scaleY = availableHeight / Math.max(1, this.mapBounds.height);
+    const targetZoom = clamp(Math.min(scaleX, scaleY), this.camera.minZoom, this.camera.maxZoom);
+    this.camera.zoom = targetZoom;
+  } else {
+    this.camera.zoom = clamp(this.camera.zoom, this.camera.minZoom, this.camera.maxZoom);
+  }
+  
+  const centered = this._centeredOffsets(this.camera.zoom);
+  this.camera.offsetX = centered.offsetX;
+  this.camera.offsetY = centered.offsetY;
+  this._clampCamera();
+  
+  // Round to prevent drift
+  this.camera.homeOffsetX = Math.round(this.camera.offsetX * 100) / 100;
+  this.camera.homeOffsetY = Math.round(this.camera.offsetY * 100) / 100;
+  this.camera.homeZoom = Math.round(this.camera.zoom * 10000) / 10000;
+  
+  // Set exact values
+  this.camera.offsetX = this.camera.homeOffsetX;
+  this.camera.offsetY = this.camera.homeOffsetY;
+  this.camera.zoom = this.camera.homeZoom;
+  
+  this._updateCameraTransform();
+}
 
   _updateCameraTransform() {
     const { zoom, offsetX, offsetY } = this.camera;
@@ -1728,12 +1756,9 @@ _stabilizeCamera() {
 }
 
 beginPan(screenX, screenY) {
-  // Ensure camera position is exact before starting pan
-  if (!this.camera.userControlled) {
-    this.camera.offsetX = Math.round(this.camera.offsetX * 100) / 100;
-    this.camera.offsetY = Math.round(this.camera.offsetY * 100) / 100;
-    this._updateCameraTransform();
-  }
+  // Stop any animation and lock current position
+  this.camera.offsetX = Math.round(this.camera.offsetX * 100) / 100;
+  this.camera.offsetY = Math.round(this.camera.offsetY * 100) / 100;
   
   this.panSession = {
     startX: screenX,
