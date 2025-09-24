@@ -1728,8 +1728,8 @@ endPan() {
   this.panSession = null;
 }
 isPanning() {
-    return Boolean(this.panSession);
-  }
+  return Boolean(this.panSession);
+}
 
   zoomAt(screenX, screenY, deltaY) {
     const zoomFactor = Math.exp(-deltaY * 0.0012);
