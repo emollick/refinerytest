@@ -435,15 +435,12 @@ export class RefinerySimulation {
   _advanceTick(deltaMinutes) {
     this.timeMinutes += deltaMinutes;
     const hours = deltaMinutes / 60;
-
     this.logisticsRushCooldown = Math.max(0, this.logisticsRushCooldown - hours);
     this._prunePipelineBoosts();
     const extraOperationalCost = this._consumeOperationalCost();
-
     const scenario = this.activeScenario;
     const crudeSetting = this.params.crudeIntake;
     const crudeAvailable = crudeSetting * scenario.crudeMultiplier;
-
     const distState = this._resolveUnitState("distillation");
     const distillation = distState.unit;
     const distCapacity =
@@ -659,8 +656,6 @@ export class RefinerySimulation {
     const dieselPrice = basePrices.diesel * priceModifier * (1 + scenario.dieselBias * 0.25);
     const jetPrice = basePrices.jet * priceModifier * (1 + demandJetBias * 0.35);
     const lpgPrice = basePrices.lpg * priceModifier * (1 + demandGasolineBias * 0.1);
-
-    const crudeCostPerBbl = 51 * (1 + scenario.qualityShift * 0.8);
     const maintenanceBudget =
       2.2 * this.units.length * (0.5 + this.params.maintenance * 1.4 + scenario.maintenancePenalty);
     const safetyBudget = 1.1 * this.params.safety * this.units.length;
@@ -1259,7 +1254,6 @@ export class RefinerySimulation {
   }
 
   _updateLogistics(context) {
-    const { production, hours, prices, scenario } = context;
     const produced = {
       gasoline: Math.max(0, production.gasoline * hours),
       diesel: Math.max(0, production.diesel * hours),
