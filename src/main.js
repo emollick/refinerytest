@@ -309,14 +309,20 @@ class TileRenderer {
     this.deviceScaleY = this.viewHeight / height;
     this.displayWidth = width;
     this.displayHeight = height;
-    if (!this.camera.userControlled) {
-      this._fitCameraToView({ preserveZoom: true });
-    } else {
-      const clamped = this._clampCamera();
-      if (clamped) {
-        this._updateCameraTransform();
-      }
-    }
+  if (!this.camera.userControlled) {
+  // Only recalculate if we don't have a home position yet
+  if (this.camera.homeZoom === 1 && this.camera.homeOffsetX === 0) {
+    this._fitCameraToView({ preserveZoom: true });
+  } else {
+    // Just update the transform without recalculating
+    this._updateCameraTransform();
+  }
+} else {
+  const clamped = this._clampCamera();
+  if (clamped) {
+    this._updateCameraTransform();
+  }
+}
   }
 
   setGridVisible(visible) {
