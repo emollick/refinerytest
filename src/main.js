@@ -207,6 +207,9 @@ class TileRenderer {
       maxZoom: 2.8,
       offsetX: 0,
       offsetY: 0,
+      homeOffsetX: 0,
+      homeOffsetY: 0,
+      homeZoom: 1,
       userControlled: false,
     };
     this.panSession = null;
@@ -362,6 +365,7 @@ class TileRenderer {
 
   render(deltaSeconds, { flows, logistics }) {
     this.time += deltaSeconds;
+    this._stabilizeCamera();
     if (deltaSeconds > 0) {
       this.selectionFlash += deltaSeconds;
     }
@@ -1520,10 +1524,10 @@ class TileRenderer {
     const offsetY = this.viewHeight / 2 - this.mapBounds.centerY * this.camera.zoom;
     this.camera.offsetX = offsetX;
     this.camera.offsetY = offsetY;
-    this.camera.homeOffsetX = offsetX;
-    this.camera.homeOffsetY = offsetY;
-    this.camera.homeZoom = this.camera.zoom;
     this._clampCamera();
+    this.camera.homeOffsetX = this.camera.offsetX;
+    this.camera.homeOffsetY = this.camera.offsetY;
+    this.camera.homeZoom = this.camera.zoom;
     this._updateCameraTransform();
   }
 
@@ -1566,6 +1570,36 @@ class TileRenderer {
 
     this.camera.offsetX = offsetX;
     this.camera.offsetY = offsetY;
+  }
+  _stabilizeCamera() {
+    if (this.camera.userControlled) {
+      return;
+    }
+    const { homeOffsetX, homeOffsetY, homeZoom } = this.camera;
+    if (
+      !Number.isFinite(homeOffsetX) ||
+      !Number.isFinite(homeOffsetY) ||
+      !Number.isFinite(homeZoom)
+    ) {
+      return;
+    }
+    let changed = false;
+    if (this.camera.offsetX !== homeOffsetX) {
+      this.camera.offsetX = homeOffsetX;
+      changed = true;
+    }
+    if (this.camera.offsetY !== homeOffsetY) {
+      this.camera.offsetY = homeOffsetY;
+      changed = true;
+    }
+    if (this.camera.zoom !== homeZoom) {
+      this.camera.zoom = homeZoom;
+      changed = true;
+    }
+    if (changed) {
+      this._clampCamera();
+      this._updateCameraTransform();
+    }
   }
 
   beginPan(screenX, screenY) {
