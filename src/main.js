@@ -1629,60 +1629,45 @@ _stabilizeCamera() {
     return;
   }
   
-  // Only recalculate if we don't have valid home positions
-  if (!Number.isFinite(this.camera.homeZoom) || 
-      !Number.isFinite(this.camera.homeOffsetX) || 
-      !Number.isFinite(this.camera.homeOffsetY)) {
-    const centered = this._centeredOffsets(this.camera.zoom);
-    this.camera.homeZoom = this.camera.zoom;
-    this.camera.homeOffsetX = centered.offsetX;
-    this.camera.homeOffsetY = centered.offsetY;
+  // Check if we're already at the home position
+  const atHome = 
+    Math.abs(this.camera.offsetX - this.camera.homeOffsetX) < 0.01 &&
+    Math.abs(this.camera.offsetY - this.camera.homeOffsetY) < 0.01 &&
+    Math.abs(this.camera.zoom - this.camera.homeZoom) < 0.0001;
+  
+  if (atHome) {
+    // Already at home, ensure exact values and don't update
+    this.camera.offsetX = this.camera.homeOffsetX;
+    this.camera.offsetY = this.camera.homeOffsetY;
+    this.camera.zoom = this.camera.homeZoom;
+    return;
   }
   
-  const targetZoom = clamp(this.camera.homeZoom, this.camera.minZoom, this.camera.maxZoom);
-  const targetOffsetX = this.camera.homeOffsetX;
-  const targetOffsetY = this.camera.homeOffsetY;
+  // We need to move toward home
+  const deltaX = this.camera.homeOffsetX - this.camera.offsetX;
+  const deltaY = this.camera.homeOffsetY - this.camera.offsetY;
+  const deltaZoom = this.camera.homeZoom - this.camera.zoom;
   
-  const deltaX = targetOffsetX - this.camera.offsetX;
-  const deltaY = targetOffsetY - this.camera.offsetY;
-  const deltaZoom = targetZoom - this.camera.zoom;
-  
-  let changed = false;
-  
-  // Use tighter thresholds and snap immediately when very close
-  const positionThreshold = 0.05;
-  const zoomThreshold = 0.0001;
-  
-  if (Math.abs(deltaZoom) > zoomThreshold) {
-    if (Math.abs(deltaZoom) < 0.01) {
-      this.camera.zoom = targetZoom;
-    } else {
-      this.camera.zoom += deltaZoom * 0.15;
-    }
-    changed = true;
+  // Snap when very close
+  if (Math.abs(deltaX) < 1) {
+    this.camera.offsetX = this.camera.homeOffsetX;
+  } else {
+    this.camera.offsetX += deltaX * 0.15;
   }
   
-  if (Math.abs(deltaX) > positionThreshold) {
-    if (Math.abs(deltaX) < 0.5) {
-      this.camera.offsetX = targetOffsetX;
-    } else {
-      this.camera.offsetX += deltaX * 0.15;
-    }
-    changed = true;
+  if (Math.abs(deltaY) < 1) {
+    this.camera.offsetY = this.camera.homeOffsetY;
+  } else {
+    this.camera.offsetY += deltaY * 0.15;
   }
   
-  if (Math.abs(deltaY) > positionThreshold) {
-    if (Math.abs(deltaY) < 0.5) {
-      this.camera.offsetY = targetOffsetY;
-    } else {
-      this.camera.offsetY += deltaY * 0.15;
-    }
-    changed = true;
+  if (Math.abs(deltaZoom) < 0.01) {
+    this.camera.zoom = this.camera.homeZoom;
+  } else {
+    this.camera.zoom += deltaZoom * 0.15;
   }
   
-  if (this._clampCamera() || changed) {
-    this._updateCameraTransform();
-  }
+  this._updateCameraTransform();
 }
   
   const desiredZoom = Number.isFinite(this.camera.homeZoom)
