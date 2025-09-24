@@ -307,6 +307,7 @@ body {
   cursor: grab;
   user-select: none;
   touch-action: none;
+  overflow: hidden;
 }
 
 #map-viewport.panning {
@@ -486,20 +487,38 @@ body {
   filter: drop-shadow(0 6px 8px rgba(4, 10, 20, 0.45));
 }
 
-.unit-body {
-  stroke: rgba(12, 20, 32, 0.6);
-  stroke-width: 2px;
+.unit-structure {
+  pointer-events: none;
 }
 
-.unit-accent {
-  fill-opacity: 0.85;
+.unit-shadow {
+  fill: rgba(8, 12, 20, 0.38);
+  filter: blur(0.4px);
+}
+
+.unit-body {
+  stroke-width: 2px;
+  stroke-linejoin: round;
+}
+
+.unit-roof {
+  stroke-width: 1.6px;
+  stroke-linejoin: round;
+  fill-opacity: 0.92;
 }
 
 .unit-highlight {
   fill: none;
   stroke: rgba(255, 244, 180, 0.45);
-  stroke-width: 3px;
+
+  stroke-width: 4px;
   stroke-linejoin: round;
+}
+
+.unit-detail {
+  stroke-linejoin: round;
+  fill-opacity: 0.92;
+
 }
 
 .unit-label {

@@ -428,14 +428,12 @@ class TileRenderer {
     if (!this.panSession && !this.camera.userControlled && this.mapBounds) {
       const targetX = this.viewWidth / 2 - this.mapBounds.centerX * this.camera.zoom;
       const targetY = this.viewHeight / 2 - this.mapBounds.centerY * this.camera.zoom;
-      const beforeX = this.camera.offsetX;
-      const beforeY = this.camera.offsetY;
-      this.camera.offsetX += (targetX - this.camera.offsetX) * 0.15;
-      this.camera.offsetY += (targetY - this.camera.offsetY) * 0.15;
-      this._clampCamera();
-      const changedX = Math.abs(beforeX - this.camera.offsetX) > 0.01;
-      const changedY = Math.abs(beforeY - this.camera.offsetY) > 0.01;
+      const changedX = Math.abs(targetX - this.camera.offsetX) > 0.01;
+      const changedY = Math.abs(targetY - this.camera.offsetY) > 0.01;
       if (changedX || changedY) {
+        this.camera.offsetX = targetX;
+        this.camera.offsetY = targetY;
+        this._clampCamera();
         this._updateCameraTransform();
       }
     }
@@ -952,18 +950,12 @@ class TileRenderer {
         transform: `translate(${center.x} ${center.y})`,
       });
 
+      const structure = this._buildUnitStructure(unit);
       const highlight = createSvgElement("polygon", {
         class: "unit-highlight",
         points: pointsToString(this._footprintPoints(unit, true)),
       });
-      const body = createSvgElement("polygon", {
-        class: "unit-body",
-        points: pointsToString(this._unitBodyPoints(unit)),
-      });
-      const accent = createSvgElement("polygon", {
-        class: `unit-accent ${unit.style}`,
-        points: pointsToString(this._unitAccentPoints(unit)),
-      });
+      highlight.setAttribute("fill", "none");
 
       const gauges = createSvgElement("g", {
         class: "unit-gauges",
@@ -1004,9 +996,8 @@ class TileRenderer {
       });
       label.textContent = unit.name;
 
+      group.appendChild(structure.group);
       group.appendChild(highlight);
-      group.appendChild(body);
-      group.appendChild(accent);
       group.appendChild(gauges);
       group.appendChild(label);
       this.layers.units.appendChild(group);
@@ -1014,14 +1005,246 @@ class TileRenderer {
       nodes.set(unit.id, {
         group,
         highlight,
-        body,
-        accent,
+        body: structure.body,
+        roof: structure.roof,
+        shadow: structure.shadow,
         loadBar,
         healthBar,
         barWidth: 52,
         baseOpacity: 0.35,
       });
     }
+    return nodes;
+  }
+
+  _buildUnitStructure(unit) {
+    const group = createSvgElement("g", { class: "unit-structure" });
+    const bodyPoints = this._unitBodyPoints(unit);
+    const shadowPoints = translatePoints(bodyPoints, this.tileWidth * 0.08, this.tileHeight * 0.14);
+    const roofPoints = scalePoints(bodyPoints, 0.72, 0.72);
+
+    const shadow = createSvgElement("polygon", {
+      class: "unit-shadow",
+      points: pointsToString(shadowPoints),
+    });
+    const body = createSvgElement("polygon", {
+      class: "unit-body",
+      points: pointsToString(bodyPoints),
+    });
+    const roof = createSvgElement("polygon", {
+      class: "unit-roof",
+      points: pointsToString(roofPoints),
+    });
+
+    group.appendChild(shadow);
+    group.appendChild(body);
+    group.appendChild(roof);
+
+    const details = this._unitDetailNodes(unit);
+    details.forEach((detail) => group.appendChild(detail));
+
+    return { group, body, roof, shadow, details };
+  }
+
+  _unitDetailNodes(unit) {
+    const nodes = [];
+    const baseColor = toHex(unit.color);
+    const accentColor = toHex(unit.accent);
+    const accentAlt = toHex(unit.accentAlt);
+    const makeDetail = (tag, attrs = {}) => {
+      const element = createSvgElement(tag, attrs);
+      element.classList.add("unit-detail");
+      element.setAttribute("pointer-events", "none");
+      return element;
+    };
+
+    const add = (element) => {
+      if (element) {
+        nodes.push(element);
+      }
+    };
+
+    switch (unit.style) {
+      case "towers": {
+        const spacing = this.tileWidth * 0.32;
+        const columnWidth = this.tileWidth * 0.28;
+        const columnHeight = this.tileHeight * 0.9;
+        const baseY = -this.tileHeight * 0.02;
+        [-spacing, 0, spacing].forEach((offset, index) => {
+          const column = makeDetail("polygon", {
+            points: pointsToString(diamondPoints(offset, baseY, columnWidth, columnHeight)),
+          });
+          column.setAttribute("fill", lightenColor(accentColor, index === 0 || index === 2 ? 0.08 : 0.16));
+          column.setAttribute("stroke", darkenColor(accentColor, 0.35));
+          column.setAttribute("stroke-width", "1.4");
+          add(column);
+
+          const top = makeDetail("polygon", {
+            points: pointsToString(
+              diamondPoints(offset, baseY - columnHeight * 0.48, columnWidth * 0.64, this.tileHeight * 0.3)
+            ),
+          });
+          top.setAttribute("fill", lightenColor(accentAlt, 0.35));
+          top.setAttribute("stroke", darkenColor(accentAlt, 0.38));
+          top.setAttribute("stroke-width", "1");
+          add(top);
+        });
+        const walkway = makeDetail("polygon", {
+          points: pointsToString(
+            diamondPoints(0, baseY + columnHeight * 0.36, this.tileWidth * 0.92, this.tileHeight * 0.2)
+          ),
+        });
+        walkway.setAttribute("fill", applyAlpha(lightenColor(accentAlt, 0.1), 0.9));
+        walkway.setAttribute("stroke", darkenColor(accentAlt, 0.45));
+        walkway.setAttribute("stroke-width", "1");
+        add(walkway);
+        break;
+      }
+      case "reactor": {
+        const centerY = -this.tileHeight * 0.04;
+        const base = makeDetail("ellipse", {
+          cx: 0,
+          cy: centerY,
+          rx: this.tileWidth * 0.38,
+          ry: this.tileHeight * 0.32,
+        });
+        base.setAttribute("fill", lightenColor(accentColor, 0.12));
+        base.setAttribute("stroke", darkenColor(accentColor, 0.4));
+        base.setAttribute("stroke-width", "2");
+        add(base);
+
+        const crossH = makeDetail("polygon", {
+          points: pointsToString(diamondPoints(0, centerY, this.tileWidth * 0.96, this.tileHeight * 0.18)),
+        });
+        crossH.setAttribute("fill", applyAlpha(mixColor(accentAlt, baseColor, 0.35), 0.8));
+        crossH.setAttribute("stroke", darkenColor(baseColor, 0.45));
+        crossH.setAttribute("stroke-width", "1.2");
+        add(crossH);
+
+        const crossV = makeDetail("polygon", {
+          points: pointsToString(diamondPoints(0, centerY, this.tileWidth * 0.2, this.tileHeight * 1.05)),
+        });
+        crossV.setAttribute("fill", applyAlpha(mixColor(accentColor, baseColor, 0.3), 0.75));
+        crossV.setAttribute("stroke", darkenColor(baseColor, 0.45));
+        crossV.setAttribute("stroke-width", "1.1");
+        add(crossV);
+
+        const core = makeDetail("ellipse", {
+          cx: 0,
+          cy: centerY,
+          rx: this.tileWidth * 0.22,
+          ry: this.tileHeight * 0.18,
+        });
+        core.setAttribute("fill", lightenColor(accentAlt, 0.38));
+        core.setAttribute("stroke", darkenColor(accentAlt, 0.36));
+        core.setAttribute("stroke-width", "1.1");
+        add(core);
+
+        const ring = makeDetail("ellipse", {
+          cx: 0,
+          cy: centerY,
+          rx: this.tileWidth * 0.48,
+          ry: this.tileHeight * 0.36,
+          fill: "none",
+        });
+        ring.setAttribute("stroke", applyAlpha(lightenColor(accentAlt, 0.7), 0.6));
+        ring.setAttribute("stroke-width", "1.8");
+        ring.setAttribute("stroke-dasharray", "10 8");
+        add(ring);
+        break;
+      }
+      case "support": {
+        const pad = makeDetail("polygon", {
+          points: pointsToString(diamondPoints(0, this.tileHeight * 0.3, this.tileWidth * 0.9, this.tileHeight * 0.22)),
+        });
+        pad.setAttribute("fill", applyAlpha(lightenColor(baseColor, 0.1), 0.85));
+        pad.setAttribute("stroke", darkenColor(baseColor, 0.45));
+        pad.setAttribute("stroke-width", "1");
+        add(pad);
+
+        const offsets = [
+          [-this.tileWidth * 0.26, -this.tileHeight * 0.1],
+          [this.tileWidth * 0.26, -this.tileHeight * 0.1],
+          [-this.tileWidth * 0.26, this.tileHeight * 0.2],
+          [this.tileWidth * 0.26, this.tileHeight * 0.2],
+        ];
+        const tankWidth = this.tileWidth * 0.26;
+        const tankHeight = this.tileHeight * 0.28;
+        offsets.forEach(([x, y]) => {
+          const tank = makeDetail("polygon", {
+            points: pointsToString(diamondPoints(x, y, tankWidth, tankHeight)),
+          });
+          tank.setAttribute("fill", lightenColor(accentColor, 0.14));
+          tank.setAttribute("stroke", darkenColor(accentColor, 0.38));
+          tank.setAttribute("stroke-width", "1.1");
+          add(tank);
+
+          const dome = makeDetail("polygon", {
+            points: pointsToString(
+              diamondPoints(x, y - tankHeight * 0.38, tankWidth * 0.62, this.tileHeight * 0.18)
+            ),
+          });
+          dome.setAttribute("fill", lightenColor(accentAlt, 0.4));
+          dome.setAttribute("stroke", darkenColor(accentAlt, 0.36));
+          dome.setAttribute("stroke-width", "1");
+          add(dome);
+        });
+
+        const pipe = makeDetail("polygon", {
+          points: pointsToString(diamondPoints(0, -this.tileHeight * 0.38, this.tileWidth * 0.7, this.tileHeight * 0.16)),
+        });
+        pipe.setAttribute("fill", applyAlpha(mixColor(accentColor, baseColor, 0.4), 0.75));
+        pipe.setAttribute("stroke", darkenColor(baseColor, 0.5));
+        pipe.setAttribute("stroke-width", "1.1");
+        add(pipe);
+        break;
+      }
+      case "rect":
+      default: {
+        const deck = makeDetail("polygon", {
+          points: pointsToString(diamondPoints(0, this.tileHeight * 0.18, this.tileWidth * 0.96, this.tileHeight * 0.2)),
+        });
+        deck.setAttribute("fill", applyAlpha(lightenColor(baseColor, 0.08), 0.85));
+        deck.setAttribute("stroke", darkenColor(baseColor, 0.45));
+        deck.setAttribute("stroke-width", "1");
+        add(deck);
+
+        const spacing = this.tileWidth * 0.34;
+        const unitWidth = this.tileWidth * 0.26;
+        const unitHeight = this.tileHeight * 0.3;
+        const unitY = -this.tileHeight * 0.08;
+        [-spacing, 0, spacing].forEach((offset) => {
+          const pod = makeDetail("polygon", {
+            points: pointsToString(diamondPoints(offset, unitY, unitWidth, unitHeight)),
+          });
+          pod.setAttribute("fill", lightenColor(accentColor, 0.18));
+          pod.setAttribute("stroke", darkenColor(accentColor, 0.35));
+          pod.setAttribute("stroke-width", "1.1");
+          add(pod);
+
+          const vent = makeDetail("polygon", {
+            points: pointsToString(
+              diamondPoints(offset, unitY - unitHeight * 0.4, unitWidth * 0.58, this.tileHeight * 0.18)
+            ),
+          });
+          vent.setAttribute("fill", lightenColor(accentAlt, 0.45));
+          vent.setAttribute("stroke", darkenColor(accentAlt, 0.38));
+          vent.setAttribute("stroke-width", "0.9");
+          add(vent);
+        });
+
+        const stair = makeDetail("polygon", {
+          points: pointsToString(diamondPoints(-this.tileWidth * 0.52, this.tileHeight * 0.34, this.tileWidth * 0.28, this.tileHeight * 0.26)),
+        });
+        stair.setAttribute("fill", applyAlpha(darkenColor(baseColor, 0.1), 0.85));
+        stair.setAttribute("stroke", darkenColor(baseColor, 0.5));
+        stair.setAttribute("stroke-width", "1");
+        add(stair);
+
+        break;
+      }
+    }
+
     return nodes;
   }
 
@@ -1162,9 +1385,18 @@ class TileRenderer {
     for (const unit of this.unitDefs) {
       const node = this.unitNodes.get(unit.id);
       if (!node) continue;
-      node.body.setAttribute("fill", toHex(unit.color));
-      node.accent.setAttribute("fill", toHex(unit.accent));
-      node.highlight.setAttribute("stroke", "rgba(255,244,180,0.4)");
+      const baseColor = toHex(unit.color);
+      const accentColor = toHex(unit.accent);
+      node.body.setAttribute("fill", baseColor);
+      node.body.setAttribute("stroke", darkenColor(baseColor, 0.4));
+      if (node.roof) {
+        node.roof.setAttribute("fill", lightenColor(accentColor, 0.25));
+        node.roof.setAttribute("stroke", darkenColor(accentColor, 0.38));
+      }
+      if (node.shadow) {
+        node.shadow.setAttribute("fill", applyAlpha(darkenColor(baseColor, 0.55), 0.45));
+      }
+      node.highlight.setAttribute("stroke", applyAlpha(lightenColor(baseColor, 0.45), 0.85));
       node.highlight.setAttribute("stroke-opacity", node.baseOpacity);
       const labelBg = palette.labelBg;
       node.group.querySelector(".unit-label").setAttribute("fill", "#f1f5ff");
@@ -1461,41 +1693,6 @@ class TileRenderer {
     ];
   }
 
-  _unitAccentPoints(unit) {
-    switch (unit.style) {
-      case "towers":
-        return [
-          [-(this.tileWidth * 0.1), -this.tileHeight * 0.35],
-          [-(this.tileWidth * 0.02), -this.tileHeight * 0.2],
-          [-(this.tileWidth * 0.1), -this.tileHeight * 0.05],
-          [-(this.tileWidth * 0.18), -this.tileHeight * 0.2],
-        ];
-      case "reactor":
-        return [
-          [0, -this.tileHeight * 0.3],
-          [this.tileWidth * 0.18, -this.tileHeight * 0.12],
-          [0, this.tileHeight * 0.05],
-          [-this.tileWidth * 0.18, -this.tileHeight * 0.12],
-        ];
-      case "support":
-        return [
-          [this.tileWidth * 0.22, -this.tileHeight * 0.15],
-          [this.tileWidth * 0.22, this.tileHeight * 0.12],
-          [-this.tileWidth * 0.22, this.tileHeight * 0.12],
-          [-this.tileWidth * 0.22, -this.tileHeight * 0.15],
-        ];
-      default:
-        return [
-          [this.tileWidth * 0.18, -this.tileHeight * 0.18],
-          [this.tileWidth * 0.24, 0],
-          [this.tileWidth * 0.18, this.tileHeight * 0.18],
-          [-this.tileWidth * 0.18, this.tileHeight * 0.18],
-          [-this.tileWidth * 0.24, 0],
-          [-this.tileWidth * 0.18, -this.tileHeight * 0.18],
-        ];
-    }
-  }
-
   _pipelinePath(points) {
     return points
       .map((point, index) => {
@@ -1528,6 +1725,25 @@ function createSvgElement(tag, attrs = {}) {
 
 function pointsToString(points) {
   return points.map((point) => `${point[0].toFixed(1)},${point[1].toFixed(1)}`).join(" ");
+}
+
+function translatePoints(points, dx, dy) {
+  return points.map(([x, y]) => [x + dx, y + dy]);
+}
+
+function scalePoints(points, scaleX, scaleY = scaleX) {
+  return points.map(([x, y]) => [x * scaleX, y * scaleY]);
+}
+
+function diamondPoints(cx, cy, width, height) {
+  const halfWidth = width / 2;
+  const halfHeight = height / 2;
+  return [
+    [cx, cy - halfHeight],
+    [cx + halfWidth, cy],
+    [cx, cy + halfHeight],
+    [cx - halfWidth, cy],
+  ];
 }
 function toHex(colorInt) {
   const hex = colorInt.toString(16).padStart(6, "0");
