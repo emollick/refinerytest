@@ -455,11 +455,19 @@ class TileRenderer {
     return null;
   }
 
-  resetView() {
-    this.pointer.active = false;
-    this.camera.userControlled = false;
-    this._fitCameraToView({ preserveZoom: false });
-  }
+resetView() {
+  this.pointer.active = false;
+  this.camera.userControlled = false;
+  this._fitCameraToView({ preserveZoom: false });
+  // Round to prevent floating point drift
+  this.camera.homeOffsetX = Math.round(this.camera.homeOffsetX * 100) / 100;
+  this.camera.homeOffsetY = Math.round(this.camera.homeOffsetY * 100) / 100;
+  this.camera.homeZoom = Math.round(this.camera.homeZoom * 10000) / 10000;
+  this.camera.offsetX = this.camera.homeOffsetX;
+  this.camera.offsetY = this.camera.homeOffsetY;
+  this.camera.zoom = this.camera.homeZoom;
+  this._updateCameraTransform();
+}
 
   getSurfaceBounds() {
     return this.svg.getBoundingClientRect();
@@ -1621,6 +1629,62 @@ _stabilizeCamera() {
     return;
   }
   
+  // Only recalculate if we don't have valid home positions
+  if (!Number.isFinite(this.camera.homeZoom) || 
+      !Number.isFinite(this.camera.homeOffsetX) || 
+      !Number.isFinite(this.camera.homeOffsetY)) {
+    const centered = this._centeredOffsets(this.camera.zoom);
+    this.camera.homeZoom = this.camera.zoom;
+    this.camera.homeOffsetX = centered.offsetX;
+    this.camera.homeOffsetY = centered.offsetY;
+  }
+  
+  const targetZoom = clamp(this.camera.homeZoom, this.camera.minZoom, this.camera.maxZoom);
+  const targetOffsetX = this.camera.homeOffsetX;
+  const targetOffsetY = this.camera.homeOffsetY;
+  
+  const deltaX = targetOffsetX - this.camera.offsetX;
+  const deltaY = targetOffsetY - this.camera.offsetY;
+  const deltaZoom = targetZoom - this.camera.zoom;
+  
+  let changed = false;
+  
+  // Use tighter thresholds and snap immediately when very close
+  const positionThreshold = 0.05;
+  const zoomThreshold = 0.0001;
+  
+  if (Math.abs(deltaZoom) > zoomThreshold) {
+    if (Math.abs(deltaZoom) < 0.01) {
+      this.camera.zoom = targetZoom;
+    } else {
+      this.camera.zoom += deltaZoom * 0.15;
+    }
+    changed = true;
+  }
+  
+  if (Math.abs(deltaX) > positionThreshold) {
+    if (Math.abs(deltaX) < 0.5) {
+      this.camera.offsetX = targetOffsetX;
+    } else {
+      this.camera.offsetX += deltaX * 0.15;
+    }
+    changed = true;
+  }
+  
+  if (Math.abs(deltaY) > positionThreshold) {
+    if (Math.abs(deltaY) < 0.5) {
+      this.camera.offsetY = targetOffsetY;
+    } else {
+      this.camera.offsetY += deltaY * 0.15;
+    }
+    changed = true;
+  }
+  
+  if (this._clampCamera() || changed) {
+    this._updateCameraTransform();
+  }
+}
+  
   const desiredZoom = Number.isFinite(this.camera.homeZoom)
     ? clamp(this.camera.homeZoom, this.camera.minZoom, this.camera.maxZoom)
     : clamp(this.camera.zoom, this.camera.minZoom, this.camera.maxZoom);
@@ -1678,15 +1742,22 @@ _stabilizeCamera() {
   }
 }
 
-  beginPan(screenX, screenY) {
-    this.panSession = {
-      startX: screenX,
-      startY: screenY,
-      baseOffsetX: this.camera.offsetX,
-      baseOffsetY: this.camera.offsetY,
-    };
-    this.camera.userControlled = true;
+beginPan(screenX, screenY) {
+  // Ensure camera position is exact before starting pan
+  if (!this.camera.userControlled) {
+    this.camera.offsetX = Math.round(this.camera.offsetX * 100) / 100;
+    this.camera.offsetY = Math.round(this.camera.offsetY * 100) / 100;
+    this._updateCameraTransform();
   }
+  
+  this.panSession = {
+    startX: screenX,
+    startY: screenY,
+    baseOffsetX: this.camera.offsetX,
+    baseOffsetY: this.camera.offsetY,
+  };
+  this.camera.userControlled = true;
+}
 
   panTo(screenX, screenY) {
     if (!this.panSession) {
