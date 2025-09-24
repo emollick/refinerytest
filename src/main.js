@@ -1,4 +1,3 @@
-
 import { RefinerySimulation } from "./simulation.js";
 import { UIController } from "./ui.js";
 
@@ -12,7 +11,6 @@ const scenarioMenu = document.getElementById("scenario-menu");
 const unitMenu = document.getElementById("unit-menu");
 const importInput = document.getElementById("session-import-input");
 const unitPulseList = document.getElementById("unit-pulse");
-
 const mapToolbar = document.querySelector(".map-toolbar");
 const prototypeNotes = document.getElementById("prototype-notes");
 const gridToggleButton = menuBar?.querySelector('[data-action="view-toggle-grid"]');
@@ -20,12 +18,7 @@ const flowToggleButton = menuBar?.querySelector('[data-action="view-toggle-flow"
 const calloutShelf = document.getElementById("alert-callouts");
 const mapStatusPanel = document.querySelector(".map-status");
 
-const canvas = document.createElement("canvas");
-canvas.className = "tile-canvas";
 sceneContainer.innerHTML = "";
-sceneContainer.appendChild(canvas);
-const context = canvas.getContext("2d");
-context.imageSmoothingEnabled = false;
 
 const simulation = new RefinerySimulation();
 const ui = new UIController(simulation);
@@ -34,7 +27,6 @@ if (typeof ui.setModeBadge === "function") {
 }
 
 const processTopology = simulation.getProcessTopology?.() || {};
-
 const unitConnectionIndex = buildUnitConnectionIndex(processTopology);
 
 const unitConfigs = [
@@ -179,10 +171,12 @@ const pipelineConfigs = [
   },
 ];
 
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
 class TileRenderer {
-  constructor(canvasEl, ctx, simulationInstance, unitDefs, pipelineDefs) {
-    this.canvas = canvasEl;
-    this.context = ctx;
+  constructor(container, simulationInstance, unitDefs, pipelineDefs) {
+    this.container = container;
     this.simulation = simulationInstance;
     this.unitDefs = unitDefs;
     this.pipelineDefs = pipelineDefs;
@@ -191,91 +185,141 @@ class TileRenderer {
     this.tileHeight = 32;
     this.mapCols = 16;
     this.mapRows = 12;
-    this.originX = 0;
-    this.originY = 0;
+    this.viewWidth = 1180;
+    this.viewHeight = 760;
+    this.originX = this.viewWidth / 2;
+    this.originY = 150;
     this.time = 0;
+    this.selectionFlash = 0;
     this.gridVisible = true;
     this.flowVisible = true;
     this.highlightedPipelines = new Set();
     this.selectedUnitId = null;
     this.hoverUnitId = null;
-    this.paletteIndex = 0;
-    this.tiles = this._buildBaseTiles();
-    this.decor = this._buildDecor();
-    this.selectionFlash = 0;
     this.pointer = { x: 0, y: 0, active: false };
     this.deviceScaleX = 1;
     this.deviceScaleY = 1;
+    this.paletteIndex = 0;
 
     this.palettes = [
       {
-        pavement: "#bdb7a6",
-        pavementShadow: "#918b7d",
-        water: "#1f3a64",
-        waterHighlight: "#2e4f82",
-        shore: "#3a586f",
-        grass: "#7fa56f",
-        green: "#7ba97b",
-        field: "#a87b3f",
+        pavement: "#c7c0ae",
+        pavementShadow: "#8f8774",
+        water: "#1e3358",
+        waterHighlight: "#2c4b7e",
+        shore: "#345168",
+        grass: "#7aa471",
+        green: "#76a08c",
+        field: "#a37a41",
         fieldAlt: "#c99c50",
-        grid: "rgba(28, 26, 21, 0.35)",
-        shadow: "rgba(20, 22, 28, 0.25)",
+        grid: "rgba(32, 40, 54, 0.4)",
         outline: "#1c1d20",
-        pipeGlow: "rgba(255,255,255,0.65)",
+        pipeBase: "#76aee8",
+        pipeGlow: "rgba(240,252,255,0.75)",
+        labelBg: "rgba(12, 16, 22, 0.6)",
       },
       {
-        pavement: "#b3b9c4",
-        pavementShadow: "#8a8f9e",
-        water: "#162f47",
-        waterHighlight: "#214568",
-        shore: "#384c64",
-        grass: "#6e8c67",
-        green: "#78a3a3",
-        field: "#986c32",
-        fieldAlt: "#c28c3e",
-        grid: "rgba(12, 20, 32, 0.4)",
-        shadow: "rgba(5, 10, 20, 0.35)",
-        outline: "#14161c",
-        pipeGlow: "rgba(240,252,255,0.7)",
+        pavement: "#b5bcc8",
+        pavementShadow: "#88909f",
+        water: "#142a44",
+        waterHighlight: "#1e3f63",
+        shore: "#2f4663",
+        grass: "#6b8f67",
+        green: "#6b9aa2",
+        field: "#996a33",
+        fieldAlt: "#bf8c3c",
+        grid: "rgba(20, 32, 48, 0.42)",
+        outline: "#16171c",
+        pipeBase: "#8ec8ff",
+        pipeGlow: "rgba(226,246,255,0.8)",
+        labelBg: "rgba(10, 12, 18, 0.65)",
       },
     ];
+
+    this.tiles = this._buildBaseTiles();
+    this.decor = this._buildDecor();
+
+    this.svg = createSvgElement("svg", {
+      class: "tile-svg",
+      viewBox: `0 0 ${this.viewWidth} ${this.viewHeight}`,
+      role: "presentation",
+      "aria-hidden": "true",
+    });
+    this.container.appendChild(this.svg);
+
+    this.layers = {
+      base: this._createLayer("tile-layer base"),
+      grid: this._createLayer("tile-layer grid"),
+      decor: this._createLayer("tile-layer decor"),
+      pipelines: this._createLayer("tile-layer pipelines"),
+      pipelineGlow: this._createLayer("tile-layer pipeline-glow"),
+      units: this._createLayer("tile-layer units"),
+      overlay: this._createLayer("tile-layer overlay"),
+    };
+
+    this.tileNodes = this._createTiles();
+    this.gridNodes = this._createGrid();
+    this.decorNodes = this._createDecorNodes();
+    this.pipelineNodes = this._createPipelineNodes();
+    this.unitNodes = this._createUnitNodes();
+    this.pointerNode = this._createPointerNode();
+    this.tankNodes = this._createTankNodes();
+
+    this._applyPalette();
+    this.resizeToContainer(this.container);
+  }
+
+  getSurface() {
+    return this.svg;
   }
 
   resizeToContainer(container) {
     const rect = container.getBoundingClientRect();
-    const ratio = window.devicePixelRatio || 1;
     const width = Math.max(720, Math.floor(rect.width));
-    const height = Math.max(440, Math.floor(rect.height));
-    this.canvas.width = Math.floor(width * ratio);
-    this.canvas.height = Math.floor(height * ratio);
-    this.canvas.style.width = `${width}px`;
-    this.canvas.style.height = `${height}px`;
-    this.deviceScaleX = this.canvas.width / Math.max(1, width);
-    this.deviceScaleY = this.canvas.height / Math.max(1, height);
+    const height = Math.max(480, Math.floor(rect.height));
+    this.svg.setAttribute("width", width);
+    this.svg.setAttribute("height", height);
+    this.svg.style.width = `${width}px`;
+    this.svg.style.height = `${height}px`;
+    this.deviceScaleX = this.viewWidth / width;
+    this.deviceScaleY = this.viewHeight / height;
   }
 
   setGridVisible(visible) {
     this.gridVisible = visible;
+    this.layers.grid.classList.toggle("hidden", !visible);
   }
 
   setFlowVisible(visible) {
     this.flowVisible = visible;
+    this.layers.pipelineGlow.classList.toggle("hidden", !visible);
   }
 
   cyclePalette() {
     this.paletteIndex = (this.paletteIndex + 1) % this.palettes.length;
+    this._applyPalette();
   }
 
   setHighlightedPipelines(pipelines) {
     this.highlightedPipelines = new Set(pipelines);
+    for (const [id, node] of this.pipelineNodes.entries()) {
+      node.group.classList.toggle("highlighted", this.highlightedPipelines.has(id));
+    }
   }
 
   setSelectedUnit(unitId) {
     this.selectedUnitId = unitId;
+    for (const [id, node] of this.unitNodes.entries()) {
+      node.group.classList.toggle("selected", id === unitId);
+    }
   }
 
   setHoverUnit(unitId) {
     this.hoverUnitId = unitId;
+    for (const [id, node] of this.unitNodes.entries()) {
+      const isHover = unitId === id && this.selectedUnitId !== id;
+      node.group.classList.toggle("hover", isHover);
+    }
   }
 
   setPointer(x, y, active) {
@@ -289,25 +333,65 @@ class TileRenderer {
     if (deltaSeconds > 0) {
       this.selectionFlash += deltaSeconds;
     }
-    const ctx = this.context;
-    const palette = this.palettes[this.paletteIndex] || this.palettes[0];
-    ctx.save();
-    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-    this.originX = this.canvas.width / 2;
-    this.originY = 64 * this.deviceScaleY;
+    for (const pipeline of this.pipelineDefs) {
+      const nodes = this.pipelineNodes.get(pipeline.id);
+      if (!nodes) continue;
+      const value = flows?.[pipeline.metric] ?? 0;
+      const ratio = pipeline.capacity ? clamp(value / pipeline.capacity, 0, 1.5) : 0;
+      const highlight = this.highlightedPipelines.has(pipeline.id);
+      const intensity = highlight ? 1 : clamp(ratio, 0.2, 0.9);
+      nodes.base.setAttribute("stroke-width", highlight ? 10 : 6);
+      nodes.base.setAttribute("stroke-opacity", (0.25 + intensity * 0.6).toFixed(3));
+      const glowOpacity = this.flowVisible ? (0.12 + intensity * 0.6).toFixed(3) : 0;
+      nodes.glow.setAttribute("stroke-opacity", glowOpacity);
+      const dashOffset = ((this.time * 60 + pipeline.phase * 40) % 180).toFixed(2);
+      nodes.glow.setAttribute("stroke-dashoffset", dashOffset);
+    }
 
-    ctx.fillStyle = palette.waterHighlight;
-    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    const unitMetrics = new Map(this.simulation.getUnits().map((unit) => [unit.id, unit]));
+    for (const [id, node] of this.unitNodes.entries()) {
+      const data = unitMetrics.get(id);
+      const utilization = clamp(data?.utilization ?? 0, 0, 1.3);
+      const integrity = clamp(data?.integrity ?? 0, 0, 1);
+      node.loadBar.setAttribute("width", (node.barWidth * clamp(utilization, 0, 1)).toFixed(1));
+      node.healthBar.setAttribute("width", (node.barWidth * integrity).toFixed(1));
+      if (this.selectedUnitId === id) {
+        const pulse = 0.45 + Math.sin(this.selectionFlash * 3) * 0.35;
+        node.highlight.setAttribute("stroke-opacity", pulse.toFixed(2));
+      } else {
+        node.highlight.setAttribute("stroke-opacity", node.baseOpacity);
+      }
+    }
 
-    this._drawTiles(palette);
-    this._drawDecor(palette);
-    this._drawPipelines(palette, flows || {});
-    this._drawUnits(palette);
-    this._drawLogistics(palette, logistics || {});
-    this._drawPointer();
+    if (this.pointer.active) {
+      const points = this._diamondPoints(this.pointer.x, this.pointer.y);
+      this.pointerNode.setAttribute("points", pointsToString(points));
+      this.pointerNode.classList.add("visible");
+    } else {
+      this.pointerNode.classList.remove("visible");
+    }
 
-    ctx.restore();
+    if (this.decorDynamic?.flare) {
+      const flame = this.decorDynamic.flare;
+      const scale = 1 + Math.sin(this.time * 4.5) * 0.2;
+      flame.element.setAttribute(
+        "transform",
+        `translate(${flame.baseX} ${flame.baseY}) scale(1 ${scale.toFixed(3)})`
+      );
+    }
+
+    const storage = logistics?.storage || {};
+    const levels = storage.levels || {};
+    const capacity = storage.capacity || {};
+    for (const [product, node] of this.tankNodes.entries()) {
+      const level = levels[product] || 0;
+      const cap = capacity[product] || 1;
+      const ratio = cap ? clamp(level / cap, 0, 1) : 0;
+      const height = node.maxHeight * ratio;
+      node.fill.setAttribute("height", height.toFixed(1));
+      node.fill.setAttribute("y", (node.baseY + node.maxHeight - height).toFixed(1));
+    }
   }
 
   screenToIso(clientX, clientY) {
@@ -331,6 +415,331 @@ class TileRenderer {
 
   resetView() {
     this.pointer.active = false;
+  }
+
+  getSurfaceBounds() {
+    return this.svg.getBoundingClientRect();
+  }
+
+  _createLayer(className) {
+    const group = createSvgElement("g", { class: className });
+    this.svg.appendChild(group);
+    return group;
+  }
+
+  _createTiles() {
+    const nodes = [];
+    for (let y = 0; y < this.mapRows; y += 1) {
+      for (let x = 0; x < this.mapCols; x += 1) {
+        const type = this.tiles[y][x];
+        const polygon = createSvgElement("polygon", {
+          class: `tile ${type}`,
+          points: pointsToString(this._tileDiamondPoints(x, y)),
+        });
+        this.layers.base.appendChild(polygon);
+        nodes.push({ polygon, type, x, y });
+      }
+    }
+    return nodes;
+  }
+
+  _createGrid() {
+    const nodes = [];
+    for (let y = 0; y < this.mapRows; y += 1) {
+      for (let x = 0; x < this.mapCols; x += 1) {
+        const polygon = createSvgElement("polygon", {
+          class: "grid-line",
+          points: pointsToString(this._tileDiamondPoints(x, y)),
+        });
+        this.layers.grid.appendChild(polygon);
+        nodes.push(polygon);
+      }
+    }
+    return nodes;
+  }
+
+  _createDecorNodes() {
+    const nodes = [];
+    this.decorDynamic = {};
+    for (const item of this.decor) {
+      if (item.type === "parking") {
+        const { x, y } = this._tileToScreen(item.x, item.y);
+        const width = this.tileWidth * item.width * 0.5;
+        const height = this.tileHeight * item.height;
+        const polygon = createSvgElement("polygon", {
+          class: "decor parking",
+          points: pointsToString([
+            [x, y],
+            [x + width, y + height * 0.5],
+            [x, y + height],
+            [x - width, y + height * 0.5],
+          ]),
+        });
+        this.layers.decor.appendChild(polygon);
+        nodes.push(polygon);
+      } else if (item.type === "booth") {
+        const { x, y } = this._tileToScreen(item.x, item.y);
+        const booth = createSvgElement("polygon", {
+          class: "decor booth",
+          points: pointsToString([
+            [x, y + this.tileHeight * 0.2],
+            [x + 14, y + this.tileHeight * 0.45],
+            [x, y + this.tileHeight * 0.7],
+            [x - 14, y + this.tileHeight * 0.45],
+          ]),
+        });
+        this.layers.decor.appendChild(booth);
+        nodes.push(booth);
+      } else if (item.type === "flare") {
+        const { x, y } = this._tileToScreen(item.x, item.y);
+        const base = createSvgElement("circle", {
+          class: "decor flare-base",
+          cx: x,
+          cy: y + 6,
+          r: 4,
+        });
+        const flame = createSvgElement("ellipse", {
+          class: "decor flare",
+          cx: 0,
+          cy: 0,
+          rx: 6,
+          ry: 20,
+        });
+        flame.setAttribute("transform", `translate(${x} ${y - 14})`);
+        this.layers.decor.appendChild(base);
+        this.layers.decor.appendChild(flame);
+        nodes.push(base, flame);
+        this.decorDynamic.flare = { element: flame, baseX: x, baseY: y - 14 };
+      } else if (item.type === "dock") {
+        const { x, y } = this._tileToScreen(item.x, item.y);
+        const polygon = createSvgElement("polygon", {
+          class: "decor dock",
+          points: pointsToString([
+            [x, y],
+            [x + 22, y + 14],
+            [x - 6, y + 30],
+            [x - 24, y + 14],
+          ]),
+        });
+        this.layers.decor.appendChild(polygon);
+        nodes.push(polygon);
+      } else if (item.type === "barn") {
+        const { x, y } = this._tileToScreen(item.x, item.y);
+        const barn = createSvgElement("polygon", {
+          class: "decor barn",
+          points: pointsToString([
+            [x, y + this.tileHeight * 0.3],
+            [x + 20, y + this.tileHeight * 0.55],
+            [x, y + this.tileHeight * 0.82],
+            [x - 20, y + this.tileHeight * 0.55],
+          ]),
+        });
+        this.layers.decor.appendChild(barn);
+        nodes.push(barn);
+      } else if (item.type === "recording") {
+        const { x, y } = this._tileToScreen(item.x, item.y);
+        const note = createSvgElement("rect", {
+          class: "decor recording",
+          x: x - 22,
+          y: y - 6,
+          width: 44,
+          height: 16,
+          rx: 2,
+        });
+        this.layers.decor.appendChild(note);
+        nodes.push(note);
+      }
+    }
+    return nodes;
+  }
+
+  _createPipelineNodes() {
+    const nodes = new Map();
+    for (const pipeline of this.pipelineDefs) {
+      const pathData = this._pipelinePath(pipeline.path);
+      const base = createSvgElement("path", {
+        class: "pipeline-base",
+        d: pathData,
+        stroke: toHex(pipeline.color),
+      });
+      const glow = createSvgElement("path", {
+        class: "pipeline-glow",
+        d: pathData,
+        stroke: this.palettes[this.paletteIndex].pipeGlow,
+        "stroke-dasharray": "18 22",
+      });
+      this.layers.pipelines.appendChild(base);
+      this.layers.pipelineGlow.appendChild(glow);
+      nodes.set(pipeline.id, { group: base, base, glow });
+    }
+    return nodes;
+  }
+
+  _createUnitNodes() {
+    const nodes = new Map();
+    for (const unit of this.unitDefs) {
+      const center = this._tileToScreen(unit.tileX + unit.width / 2, unit.tileY + unit.height / 2);
+      const group = createSvgElement("g", {
+        class: "unit",
+        "data-unit": unit.id,
+        transform: `translate(${center.x} ${center.y})`,
+      });
+
+      const highlight = createSvgElement("polygon", {
+        class: "unit-highlight",
+        points: pointsToString(this._footprintPoints(unit, true)),
+      });
+      const body = createSvgElement("polygon", {
+        class: "unit-body",
+        points: pointsToString(this._unitBodyPoints(unit)),
+      });
+      const accent = createSvgElement("polygon", {
+        class: `unit-accent ${unit.style}`,
+        points: pointsToString(this._unitAccentPoints(unit)),
+      });
+
+      const gauges = createSvgElement("g", {
+        class: "unit-gauges",
+        transform: `translate(-28 ${this.tileHeight * 0.5})`,
+      });
+      const loadBar = createSvgElement("rect", {
+        class: "gauge-load",
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 4,
+        rx: 2,
+      });
+      const healthBar = createSvgElement("rect", {
+        class: "gauge-health",
+        x: 0,
+        y: 6,
+        width: 0,
+        height: 4,
+        rx: 2,
+      });
+      const gaugeBg = createSvgElement("rect", {
+        class: "gauge-bg",
+        x: 0,
+        y: 0,
+        width: 52,
+        height: 10,
+        rx: 3,
+      });
+      gauges.appendChild(gaugeBg);
+      gauges.appendChild(loadBar);
+      gauges.appendChild(healthBar);
+
+      const label = createSvgElement("text", {
+        class: "unit-label",
+        "text-anchor": "middle",
+        transform: `translate(0 ${this.tileHeight * 0.85})`,
+      });
+      label.textContent = unit.name;
+
+      group.appendChild(highlight);
+      group.appendChild(body);
+      group.appendChild(accent);
+      group.appendChild(gauges);
+      group.appendChild(label);
+      this.layers.units.appendChild(group);
+
+      nodes.set(unit.id, {
+        group,
+        highlight,
+        body,
+        accent,
+        loadBar,
+        healthBar,
+        barWidth: 52,
+        baseOpacity: 0.35,
+      });
+    }
+    return nodes;
+  }
+
+  _createPointerNode() {
+    const pointer = createSvgElement("polygon", { class: "pointer" });
+    this.layers.overlay.appendChild(pointer);
+    return pointer;
+  }
+
+  _createTankNodes() {
+    const nodes = new Map();
+    const tanks = [
+      { product: "gasoline", x: 13.6, y: 5.6 },
+      { product: "diesel", x: 13.2, y: 6.6 },
+      { product: "jet", x: 14.0, y: 6.2 },
+    ];
+    tanks.forEach((tank) => {
+      const { x, y } = this._tileToScreen(tank.x, tank.y);
+      const base = createSvgElement("polygon", {
+        class: "tank-base",
+        points: pointsToString([
+          [x, y],
+          [x + 18, y + 12],
+          [x, y + 24],
+          [x - 18, y + 12],
+        ]),
+      });
+      const fill = createSvgElement("rect", {
+        class: "tank-fill",
+        x: x - 12,
+        y: y + 8,
+        width: 24,
+        height: 0,
+      });
+      this.layers.decor.appendChild(base);
+      this.layers.decor.appendChild(fill);
+      nodes.set(tank.product, {
+        base,
+        fill,
+        maxHeight: 14,
+        baseY: y + 8,
+      });
+    });
+    return nodes;
+  }
+
+  _applyPalette() {
+    const palette = this.palettes[this.paletteIndex] || this.palettes[0];
+    this.tileNodes.forEach((tile) => {
+      const color = palette[tile.type] || palette.pavement;
+      tile.polygon.setAttribute("fill", color);
+      tile.polygon.style.fill = color;
+    });
+    this.gridNodes.forEach((grid) => {
+      grid.setAttribute("stroke", palette.grid);
+    });
+    this.decorNodes.forEach((node) => {
+      if (node.classList?.contains("recording")) {
+        node.setAttribute("fill", "rgba(255,255,255,0.18)");
+      }
+    });
+    for (const [id, nodes] of this.pipelineNodes.entries()) {
+      const config = this.pipelineLookup.get(id);
+      nodes.base.setAttribute("stroke", palette.pipeBase);
+      nodes.glow.setAttribute("stroke", palette.pipeGlow);
+      if (config?.color) {
+        nodes.base.setAttribute("stroke", toHex(config.color));
+      }
+    }
+    for (const unit of this.unitDefs) {
+      const node = this.unitNodes.get(unit.id);
+      if (!node) continue;
+      node.body.setAttribute("fill", toHex(unit.color));
+      node.accent.setAttribute("fill", toHex(unit.accent));
+      node.highlight.setAttribute("stroke", "rgba(255,244,180,0.4)");
+      node.highlight.setAttribute("stroke-opacity", node.baseOpacity);
+      const labelBg = palette.labelBg;
+      node.group.querySelector(".unit-label").setAttribute("fill", "#f1f5ff");
+      const gaugeBg = node.group.querySelector(".gauge-bg");
+      if (gaugeBg) {
+        gaugeBg.setAttribute("fill", labelBg);
+      }
+      node.loadBar.setAttribute("fill", "#6ed16f");
+      node.healthBar.setAttribute("fill", "#66b0ff");
+    }
   }
 
   _buildBaseTiles() {
@@ -373,465 +782,119 @@ class TileRenderer {
     ];
   }
 
-
-  _drawTiles(palette) {
-    const ctx = this.context;
-    for (let y = 0; y < this.mapRows; y += 1) {
-      for (let x = 0; x < this.mapCols; x += 1) {
-        const tileType = this.tiles[y][x];
-        this._drawTileDiamond(x, y, tileType, palette);
-      }
-    }
-  }
-
-  _drawTileDiamond(tileX, tileY, type, palette) {
-    const ctx = this.context;
-    const { x, y } = this._tileToScreen(tileX, tileY);
-    const halfW = this.tileWidth / 2;
-    const halfH = this.tileHeight / 2;
-
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + halfW, y + halfH);
-    ctx.lineTo(x, y + this.tileHeight);
-    ctx.lineTo(x - halfW, y + halfH);
-    ctx.closePath();
-
-    switch (type) {
-      case "water":
-        ctx.fillStyle = palette.water;
-        ctx.fill();
-        ctx.fillStyle = palette.waterHighlight;
-        ctx.globalAlpha = 0.25;
-        ctx.fillRect(x - halfW, y + halfH - 2 * this.deviceScaleY, this.tileWidth, 4 * this.deviceScaleY);
-        ctx.globalAlpha = 1;
-        break;
-      case "shore":
-        ctx.fillStyle = palette.shore;
-        ctx.fill();
-        break;
-      case "grass":
-        ctx.fillStyle = palette.grass;
-        ctx.fill();
-        break;
-      case "green":
-        ctx.fillStyle = palette.green;
-        ctx.fill();
-        break;
-      case "field":
-        ctx.fillStyle = palette.field;
-        ctx.fill();
-        ctx.clip();
-        ctx.strokeStyle = palette.fieldAlt;
-        ctx.lineWidth = 2 * this.deviceScaleY;
-        const stripes = 4;
-        for (let i = -stripes; i < stripes * 2; i += 1) {
-          ctx.beginPath();
-          const startX = x - halfW + (i * this.tileWidth) / stripes;
-          ctx.moveTo(startX, y + this.tileHeight);
-          ctx.lineTo(startX + this.tileWidth / 2, y + halfH);
-          ctx.stroke();
-        }
-        ctx.restore();
-        break;
-      default:
-        ctx.fillStyle = palette.pavement;
-        ctx.fill();
-        break;
-    }
-
-    if (type !== "water" && type !== "shore") {
-      ctx.fillStyle = palette.shadow;
-      ctx.globalAlpha = 0.45;
-      ctx.beginPath();
-      ctx.moveTo(x + 1 * this.deviceScaleX, y + halfH + 4 * this.deviceScaleY);
-      ctx.lineTo(x + halfW - 2 * this.deviceScaleX, y + halfH + 10 * this.deviceScaleY);
-      ctx.lineTo(x - 2 * this.deviceScaleX, y + this.tileHeight - 2 * this.deviceScaleY);
-      ctx.closePath();
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    }
-
-    if (this.gridVisible) {
-      ctx.lineWidth = 1 * this.deviceScaleX;
-      ctx.strokeStyle = palette.grid;
-      ctx.stroke();
-    }
-  }
-
-  _drawDecor(palette) {
-    const ctx = this.context;
-    this.decor.forEach((item) => {
-      if (item.type === "parking") {
-        const { x, y } = this._tileToScreen(item.x, item.y);
-        const width = this.tileWidth * item.width * 0.5;
-        const height = this.tileHeight * item.height;
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.fillStyle = palette.pavementShadow;
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(width, height * 0.5);
-        ctx.lineTo(0, height);
-        ctx.lineTo(-width, height * 0.5);
-        ctx.closePath();
-        ctx.fill();
-        ctx.strokeStyle = "rgba(255,255,255,0.2)";
-        ctx.lineWidth = 2 * this.deviceScaleX;
-        ctx.beginPath();
-        ctx.moveTo(-width * 0.5, height * 0.6);
-        ctx.lineTo(width * 0.5, height * 0.2);
-        ctx.stroke();
-        ctx.restore();
-      } else if (item.type === "booth") {
-        const { x, y } = this._tileToScreen(item.x, item.y);
-        ctx.save();
-        ctx.translate(x, y + this.tileHeight * 0.2);
-        ctx.fillStyle = "#d0d6df";
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(14 * this.deviceScaleX, 7 * this.deviceScaleY);
-        ctx.lineTo(0, 14 * this.deviceScaleY);
-        ctx.lineTo(-14 * this.deviceScaleX, 7 * this.deviceScaleY);
-        ctx.closePath();
-        ctx.fill();
-        ctx.fillStyle = "#8c9aa9";
-        ctx.fillRect(-6 * this.deviceScaleX, 7 * this.deviceScaleY, 12 * this.deviceScaleX, 6 * this.deviceScaleY);
-        ctx.restore();
-      } else if (item.type === "flare") {
-        const { x, y } = this._tileToScreen(item.x, item.y);
-        const flameHeight = 20 * this.deviceScaleY + Math.sin(this.time * 4) * 6 * this.deviceScaleY;
-        ctx.save();
-        ctx.translate(x, y - flameHeight / 2);
-        ctx.fillStyle = "#f7ab3d";
-        ctx.beginPath();
-        ctx.ellipse(0, 0, 6 * this.deviceScaleX, flameHeight, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 0.7;
-        ctx.fillStyle = "#ffdf7a";
-        ctx.beginPath();
-        ctx.ellipse(0, -4 * this.deviceScaleY, 4 * this.deviceScaleX, flameHeight * 0.7, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      } else if (item.type === "dock") {
-        const { x, y } = this._tileToScreen(item.x, item.y);
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.fillStyle = palette.pavementShadow;
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(18 * this.deviceScaleX, 12 * this.deviceScaleY);
-        ctx.lineTo(-4 * this.deviceScaleX, 26 * this.deviceScaleY);
-        ctx.lineTo(-18 * this.deviceScaleX, 12 * this.deviceScaleY);
-        ctx.closePath();
-        ctx.fill();
-        const pulse = 0.35 + Math.abs(Math.sin(this.time * 5)) * 0.4;
-        ctx.fillStyle = `rgba(165, 214, 255, ${pulse.toFixed(2)})`;
-        ctx.fillRect(-4 * this.deviceScaleX, 6 * this.deviceScaleY, 8 * this.deviceScaleX, 12 * this.deviceScaleY);
-        ctx.restore();
-      } else if (item.type === "barn") {
-        const { x, y } = this._tileToScreen(item.x, item.y);
-        ctx.save();
-        ctx.translate(x, y + this.tileHeight * 0.35);
-        ctx.fillStyle = "#784421";
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(20 * this.deviceScaleX, 14 * this.deviceScaleY);
-        ctx.lineTo(0, 28 * this.deviceScaleY);
-        ctx.lineTo(-20 * this.deviceScaleX, 14 * this.deviceScaleY);
-        ctx.closePath();
-        ctx.fill();
-        ctx.fillStyle = "#bc8f45";
-        ctx.beginPath();
-        ctx.moveTo(0, -10 * this.deviceScaleY);
-        ctx.lineTo(14 * this.deviceScaleX, 6 * this.deviceScaleY);
-        ctx.lineTo(-14 * this.deviceScaleX, 6 * this.deviceScaleY);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
-      } else if (item.type === "recording") {
-        const { x, y } = this._tileToScreen(item.x, item.y);
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.fillStyle = "rgba(255, 255, 255, 0.14)";
-        ctx.fillRect(-22 * this.deviceScaleX, -4 * this.deviceScaleY, 44 * this.deviceScaleX, 16 * this.deviceScaleY);
-        ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
-        ctx.fillRect(-18 * this.deviceScaleX, -2 * this.deviceScaleY, 36 * this.deviceScaleX, 4 * this.deviceScaleY);
-        ctx.restore();
-      }
-    });
-  }
-
-  _drawPipelines(palette, flows) {
-    const ctx = this.context;
-    this.pipelineDefs.forEach((pipeline) => {
-      const ratio = pipeline.capacity ? clamp((flows[pipeline.metric] || 0) / pipeline.capacity, 0, 1.5) : 0;
-      const intensity = this.highlightedPipelines.has(pipeline.id) ? 1 : clamp(ratio, 0.15, 0.8);
-      const color = toHex(pipeline.color);
-      ctx.save();
-      ctx.lineWidth = (this.highlightedPipelines.has(pipeline.id) ? 8 : 6) * this.deviceScaleX;
-      ctx.lineCap = "round";
-      ctx.strokeStyle = applyAlpha(color, 0.55 + intensity * 0.35);
-      ctx.beginPath();
-      pipeline.path.forEach((point, index) => {
-        const { x, y } = this._tileToScreen(point.x, point.y);
-        if (index === 0) {
-          ctx.moveTo(x, y);
-        } else {
-          ctx.lineTo(x, y);
-        }
-      });
-      ctx.stroke();
-      if (this.flowVisible) {
-        const pulse = Math.sin(this.time * 4 + pipeline.phase) * 0.5 + 0.5;
-        ctx.lineWidth = (this.highlightedPipelines.has(pipeline.id) ? 4 : 3) * this.deviceScaleX;
-        ctx.strokeStyle = palette.pipeGlow;
-        ctx.globalAlpha = 0.35 + pulse * clamp(ratio, 0.1, 0.9);
-        ctx.stroke();
-      }
-      ctx.restore();
-    });
-  }
-
-  _drawUnits(palette) {
-    const ctx = this.context;
-    const selected = this.selectedUnitId;
-    const hover = this.hoverUnitId && this.hoverUnitId !== selected ? this.hoverUnitId : null;
-    const metrics = new Map(this.simulation.getUnits().map((unit) => [unit.id, unit]));
-
-    this.unitDefs.forEach((unit) => {
-      const footprint = this._collectFootprint(unit);
-      const { x, y } = this._tileToScreen(unit.tileX + unit.width / 2, unit.tileY + unit.height / 2);
-      const color = toHex(unit.color);
-      const accent = toHex(unit.accent);
-      const accentAlt = toHex(unit.accentAlt);
-      ctx.save();
-      footprint.forEach((tile) => {
-        this._drawTileDiamond(tile.x, tile.y, "pavement", palette);
-      });
-
-      ctx.translate(x, y + this.tileHeight * 0.25);
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(this.tileWidth * 0.6, this.tileHeight * 0.3);
-      ctx.lineTo(0, this.tileHeight * 0.6);
-      ctx.lineTo(-this.tileWidth * 0.6, this.tileHeight * 0.3);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.fillStyle = accent;
-      ctx.beginPath();
-      ctx.moveTo(0, -this.tileHeight * 0.2);
-      ctx.lineTo(this.tileWidth * 0.3, this.tileHeight * 0.05);
-      ctx.lineTo(-this.tileWidth * 0.3, this.tileHeight * 0.05);
-      ctx.closePath();
-      ctx.fill();
-
-      switch (unit.style) {
-        case "towers":
-          this._drawTower(ctx, 0, -this.tileHeight * 0.28, accent, accentAlt);
-          this._drawTower(ctx, this.tileWidth * 0.18, -this.tileHeight * 0.24, accent, accentAlt);
-          break;
-        case "reactor":
-          this._drawReactor(ctx, accent, accentAlt);
-          break;
-        case "support":
-          this._drawSupport(ctx, accent, accentAlt);
-          break;
-        default:
-          this._drawBox(ctx, accent, accentAlt);
-          break;
-      }
-
-      const data = metrics.get(unit.id);
-      if (data) {
-        const utilization = clamp(data.utilization ?? 0, 0, 1.3);
-        const integrity = clamp(data.integrity ?? 0, 0, 1);
-        const width = this.tileWidth * 0.75;
-        const height = 4 * this.deviceScaleY;
-        ctx.fillStyle = "rgba(0,0,0,0.5)";
-        ctx.fillRect(-width / 2, this.tileHeight * 0.38, width, height);
-        ctx.fillStyle = `hsl(${Math.max(0, 120 - utilization * 90)}, 68%, 55%)`;
-        ctx.fillRect(-width / 2, this.tileHeight * 0.38, width * clamp(utilization, 0, 1), height);
-        ctx.fillStyle = `hsl(${Math.max(10, 80 + integrity * 40)}, 68%, 50%)`;
-        ctx.fillRect(-width / 2, this.tileHeight * 0.38 + height + 2 * this.deviceScaleY, width * integrity, height);
-      }
-
-      ctx.restore();
-
-      const label = metrics.get(unit.id)?.name || unit.name;
-      const { x: labelX, y: labelY } = this._tileToScreen(unit.tileX + unit.width / 2, unit.tileY + unit.height);
-      ctx.save();
-      ctx.fillStyle = "rgba(12, 16, 22, 0.66)";
-      ctx.fillRect(
-        labelX - this.tileWidth * 0.35,
-        labelY + this.tileHeight * 0.05,
-        this.tileWidth * 0.7,
-        18 * this.deviceScaleY
-      );
-      ctx.fillStyle = "#f3f4f5";
-      ctx.font = `${12 * this.deviceScaleY}px 'Inconsolata', monospace`;
-      ctx.textAlign = "center";
-      ctx.fillText(label, labelX, labelY + this.tileHeight * 0.18);
-      ctx.restore();
-
-      if (unit.id === selected) {
-        this._drawHighlight(footprint, true);
-      } else if (unit.id === hover) {
-        this._drawHighlight(footprint, false);
-      }
-    });
-  }
-  _drawTower(ctx, offsetX, offsetY, accent, accentAlt) {
-    ctx.save();
-    ctx.translate(offsetX, offsetY);
-    ctx.fillStyle = accent;
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(14 * this.deviceScaleX, 8 * this.deviceScaleY);
-    ctx.lineTo(0, 16 * this.deviceScaleY);
-    ctx.lineTo(-14 * this.deviceScaleX, 8 * this.deviceScaleY);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = accentAlt;
-    ctx.beginPath();
-    ctx.moveTo(0, -10 * this.deviceScaleY);
-    ctx.lineTo(9 * this.deviceScaleX, 0);
-    ctx.lineTo(-9 * this.deviceScaleX, 0);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-  }
-
-  _drawReactor(ctx, accent, accentAlt) {
-    ctx.save();
-    ctx.fillStyle = accent;
-    ctx.beginPath();
-    ctx.ellipse(0, -10 * this.deviceScaleY, 16 * this.deviceScaleX, 12 * this.deviceScaleY, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = accentAlt;
-    ctx.beginPath();
-    ctx.ellipse(0, -22 * this.deviceScaleY, 10 * this.deviceScaleX, 16 * this.deviceScaleY, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  _drawSupport(ctx, accent, accentAlt) {
-    ctx.save();
-    ctx.fillStyle = accent;
-    ctx.fillRect(-16 * this.deviceScaleX, -8 * this.deviceScaleY, 32 * this.deviceScaleX, 18 * this.deviceScaleY);
-    ctx.fillStyle = accentAlt;
-    ctx.fillRect(-12 * this.deviceScaleX, -18 * this.deviceScaleY, 24 * this.deviceScaleX, 8 * this.deviceScaleY);
-    ctx.restore();
-  }
-
-  _drawBox(ctx, accent, accentAlt) {
-    ctx.save();
-    ctx.fillStyle = accent;
-    ctx.fillRect(-18 * this.deviceScaleX, -12 * this.deviceScaleY, 36 * this.deviceScaleX, 20 * this.deviceScaleY);
-    ctx.fillStyle = accentAlt;
-    ctx.fillRect(-12 * this.deviceScaleX, -20 * this.deviceScaleY, 24 * this.deviceScaleX, 10 * this.deviceScaleY);
-    ctx.restore();
-  }
-
-  _drawHighlight(footprint, solid) {
-    const ctx = this.context;
-    ctx.save();
-    ctx.lineWidth = solid ? 4 * this.deviceScaleX : 2 * this.deviceScaleX;
-    ctx.strokeStyle = solid
-      ? `rgba(255, 244, 180, ${0.6 + Math.sin(this.selectionFlash * 2) * 0.2})`
-      : "rgba(255, 255, 255, 0.4)";
-    footprint.forEach((tile) => {
-      const { x, y } = this._tileToScreen(tile.x, tile.y);
-      const halfW = this.tileWidth / 2;
-      const halfH = this.tileHeight / 2;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + halfW, y + halfH);
-      ctx.lineTo(x, y + this.tileHeight);
-      ctx.lineTo(x - halfW, y + halfH);
-      ctx.closePath();
-      ctx.stroke();
-    });
-    ctx.restore();
-  }
-
-  _collectFootprint(unit) {
-    const tiles = [];
-    for (let dy = 0; dy < unit.height; dy += 1) {
-      for (let dx = 0; dx < unit.width; dx += 1) {
-        tiles.push({ x: unit.tileX + dx, y: unit.tileY + dy });
-      }
-    }
-    return tiles;
-  }
-
-  _drawLogistics(palette, logistics) {
-    const ctx = this.context;
-    const storage = logistics.storage || {};
-    const levels = storage.levels || {};
-    const capacity = storage.capacity || {};
-    const tankPositions = [
-      { product: "gasoline", x: 13.6, y: 5.6 },
-      { product: "diesel", x: 13.2, y: 6.6 },
-      { product: "jet", x: 14.0, y: 6.2 },
-    ];
-    tankPositions.forEach((tank) => {
-      const { x, y } = this._tileToScreen(tank.x, tank.y);
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.fillStyle = palette.pavementShadow;
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(16 * this.deviceScaleX, 10 * this.deviceScaleY);
-      ctx.lineTo(0, 20 * this.deviceScaleY);
-      ctx.lineTo(-16 * this.deviceScaleX, 10 * this.deviceScaleY);
-      ctx.closePath();
-      ctx.fill();
-      const level = levels[tank.product] || 0;
-      const cap = capacity[tank.product] || 1;
-      const ratio = clamp(cap ? level / cap : 0, 0, 1);
-      ctx.fillStyle = `rgba(120, 200, 255, ${0.3 + ratio * 0.6})`;
-      ctx.fillRect(
-        -10 * this.deviceScaleX,
-        4 * this.deviceScaleY + (1 - ratio) * 12 * this.deviceScaleY,
-        20 * this.deviceScaleX,
-        ratio * 12 * this.deviceScaleY
-      );
-      ctx.restore();
-    });
-  }
-
-  _drawPointer() {
-    if (!this.pointer.active) {
-      return;
-    }
-    const ctx = this.context;
-    const { x, y } = this._tileToScreen(this.pointer.x, this.pointer.y);
-    const halfW = this.tileWidth / 2;
-    const halfH = this.tileHeight / 2;
-    ctx.save();
-    ctx.lineWidth = 2 * this.deviceScaleX;
-    ctx.strokeStyle = "rgba(255,255,255,0.35)";
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + halfW, y + halfH);
-    ctx.lineTo(x, y + this.tileHeight);
-    ctx.lineTo(x - halfW, y + halfH);
-    ctx.closePath();
-    ctx.stroke();
-    ctx.restore();
-  }
-
   _tileToScreen(tileX, tileY) {
-    const screenX = this.originX + (tileX - tileY) * (this.tileWidth / 2);
-    const screenY = this.originY + (tileX + tileY) * (this.tileHeight / 2);
+    return this._isoToScreen(tileX, tileY);
+  }
+
+  _isoToScreen(worldX, worldY) {
+    const screenX = this.originX + (worldX - worldY) * (this.tileWidth / 2);
+    const screenY = this.originY + (worldX + worldY) * (this.tileHeight / 2);
     return { x: screenX, y: screenY };
+  }
+
+  _tileDiamondPoints(tileX, tileY) {
+    const { x, y } = this._tileToScreen(tileX, tileY);
+    return [
+      [x, y],
+      [x + this.tileWidth / 2, y + this.tileHeight / 2],
+      [x, y + this.tileHeight],
+      [x - this.tileWidth / 2, y + this.tileHeight / 2],
+    ];
+  }
+
+  _footprintPoints(unit, relative = false) {
+    const corners = [
+      this._isoToScreen(unit.tileX, unit.tileY),
+      this._isoToScreen(unit.tileX + unit.width, unit.tileY),
+      this._isoToScreen(unit.tileX + unit.width, unit.tileY + unit.height),
+      this._isoToScreen(unit.tileX, unit.tileY + unit.height),
+    ];
+    if (!relative) {
+      return corners.map((point) => [point.x, point.y]);
+    }
+    const center = this._tileToScreen(unit.tileX + unit.width / 2, unit.tileY + unit.height / 2);
+    return corners.map((point) => [point.x - center.x, point.y - center.y]);
+  }
+
+  _unitBodyPoints(unit) {
+    const width = this.tileWidth * Math.max(0.55, unit.width * 0.45);
+    const height = this.tileHeight * Math.max(0.6, unit.height * 0.5);
+    return [
+      [0, -height / 2],
+      [width / 2, 0],
+      [0, height / 2],
+      [-width / 2, 0],
+    ];
+  }
+
+  _unitAccentPoints(unit) {
+    switch (unit.style) {
+      case "towers":
+        return [
+          [-(this.tileWidth * 0.1), -this.tileHeight * 0.35],
+          [-(this.tileWidth * 0.02), -this.tileHeight * 0.2],
+          [-(this.tileWidth * 0.1), -this.tileHeight * 0.05],
+          [-(this.tileWidth * 0.18), -this.tileHeight * 0.2],
+        ];
+      case "reactor":
+        return [
+          [0, -this.tileHeight * 0.3],
+          [this.tileWidth * 0.18, -this.tileHeight * 0.12],
+          [0, this.tileHeight * 0.05],
+          [-this.tileWidth * 0.18, -this.tileHeight * 0.12],
+        ];
+      case "support":
+        return [
+          [this.tileWidth * 0.22, -this.tileHeight * 0.15],
+          [this.tileWidth * 0.22, this.tileHeight * 0.12],
+          [-this.tileWidth * 0.22, this.tileHeight * 0.12],
+          [-this.tileWidth * 0.22, -this.tileHeight * 0.15],
+        ];
+      default:
+        return [
+          [this.tileWidth * 0.18, -this.tileHeight * 0.18],
+          [this.tileWidth * 0.24, 0],
+          [this.tileWidth * 0.18, this.tileHeight * 0.18],
+          [-this.tileWidth * 0.18, this.tileHeight * 0.18],
+          [-this.tileWidth * 0.24, 0],
+          [-this.tileWidth * 0.18, -this.tileHeight * 0.18],
+        ];
+    }
+  }
+
+  _pipelinePath(points) {
+    return points
+      .map((point, index) => {
+        const { x, y } = this._tileToScreen(point.x, point.y);
+        const prefix = index === 0 ? "M" : "L";
+        return `${prefix}${x.toFixed(1)} ${y.toFixed(1)}`;
+      })
+      .join(" ");
+  }
+
+  _diamondPoints(worldX, worldY) {
+    const { x, y } = this._isoToScreen(worldX, worldY);
+    return [
+      [x, y],
+      [x + this.tileWidth / 2, y + this.tileHeight / 2],
+      [x, y + this.tileHeight],
+      [x - this.tileWidth / 2, y + this.tileHeight / 2],
+    ];
   }
 }
 
+function createSvgElement(tag, attrs = {}) {
+  const element = document.createElementNS(SVG_NS, tag);
+  Object.entries(attrs).forEach(([key, value]) => {
+    if (value === null || value === undefined) return;
+    element.setAttribute(key, value);
+  });
+  return element;
+}
+
+function pointsToString(points) {
+  return points.map((point) => `${point[0].toFixed(1)},${point[1].toFixed(1)}`).join(" ");
+}
 function toHex(colorInt) {
   const hex = colorInt.toString(16).padStart(6, "0");
   return `#${hex}`;
@@ -844,7 +907,8 @@ function applyAlpha(hexColor, alpha) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-const renderer = new TileRenderer(canvas, context, simulation, unitConfigs, pipelineConfigs);
+const renderer = new TileRenderer(sceneContainer, simulation, unitConfigs, pipelineConfigs);
+const surface = renderer.getSurface();
 
 const unitPulseEntries = new Map();
 const unitModeLabels = new Map();
@@ -854,7 +918,6 @@ let lastPulseRefresh = 0;
 let gridVisible = true;
 let flowOverlayVisible = true;
 let activeMenu = null;
-
 const PRESETS = {
   auto: {
     label: "AUTO",
@@ -884,7 +947,6 @@ const PRESETS = {
     log: "Emergency shutdown drill initiated.",
   },
 };
-
 
 const SESSION_PRESETS = {
   legacy: {
@@ -945,7 +1007,6 @@ const SESSION_PRESETS = {
     log: "Modernization drill loaded — chase export contracts without breaking reliability.",
   },
 };
-
 
 const toolbarPresetButtons = document.querySelectorAll("[data-preset]");
 const toolbarUnitButtons = document.querySelectorAll("[data-unit-target]");
@@ -1033,8 +1094,8 @@ if ("ResizeObserver" in window) {
 window.addEventListener("resize", () => renderer.resizeToContainer(mapViewport));
 renderer.resizeToContainer(mapViewport);
 
-canvas.addEventListener("mousemove", (event) => {
-  const rect = canvas.getBoundingClientRect();
+surface.addEventListener("mousemove", (event) => {
+  const rect = surface.getBoundingClientRect();
   const pointerX = (event.clientX - rect.left) * renderer.deviceScaleX;
   const pointerY = (event.clientY - rect.top) * renderer.deviceScaleY;
   const iso = renderer.screenToIso(pointerX, pointerY);
@@ -1047,7 +1108,7 @@ canvas.addEventListener("mousemove", (event) => {
   }
 });
 
-canvas.addEventListener("mouseleave", () => {
+surface.addEventListener("mouseleave", () => {
   renderer.setPointer(0, 0, false);
   renderer.setHoverUnit(null);
   if (selectedUnitId) {
@@ -1057,8 +1118,9 @@ canvas.addEventListener("mouseleave", () => {
   }
 });
 
-canvas.addEventListener("click", (event) => {
-  const rect = canvas.getBoundingClientRect();
+
+surface.addEventListener("click", (event) => {
+  const rect = surface.getBoundingClientRect();
   const pointerX = (event.clientX - rect.left) * renderer.deviceScaleX;
   const pointerY = (event.clientY - rect.top) * renderer.deviceScaleY;
   const iso = renderer.screenToIso(pointerX, pointerY);
@@ -1081,7 +1143,6 @@ function animate(now) {
   requestAnimationFrame(animate);
 }
 requestAnimationFrame(animate);
-
 function applyPreset(name, options = {}) {
   const preset = PRESETS[name];
   if (!preset) {
@@ -1251,18 +1312,15 @@ function handleMenuAction(action) {
       simulation.pushLog("info", `Time scale increased to ${multiplier.toFixed(2)}× baseline.`);
       break;
     }
-
     case "session-load-old":
       loadSessionPreset("legacy");
       break;
     case "session-load-new":
       loadSessionPreset("modern");
-
       break;
     case "view-center":
       renderer.resetView();
       simulation.pushLog("info", "Viewport recentered over refinery layout.");
-
       break;
     case "view-toggle-grid": {
       const nextState = !gridVisible;
@@ -1277,10 +1335,8 @@ function handleMenuAction(action) {
       break;
     }
     case "view-cycle-light":
-
       renderer.cyclePalette();
       simulation.pushLog("info", "Palette cycled — channeling SimFarm and SimCity swatches.");
-
       break;
     default:
       break;
@@ -1295,19 +1351,15 @@ function updateToggleButton(button, visible, hideLabel, showLabel) {
 
 function setGridVisibility(visible) {
   gridVisible = visible;
-
   renderer.setGridVisible(visible);
-
   updateToggleButton(gridToggleButton, gridVisible, "Hide Grid Overlay", "Show Grid Overlay");
 }
 
 function setFlowVisibility(visible) {
   flowOverlayVisible = visible;
-
   renderer.setFlowVisible(visible);
   updateToggleButton(flowToggleButton, flowOverlayVisible, "Hide Flow Glow", "Show Flow Glow");
 }
-
 
 function performSimulationReset() {
   simulation.reset();
@@ -1326,7 +1378,6 @@ function performSimulationReset() {
   populateUnitMenu();
   ui.setRunning(true);
 }
-
 
 function loadSessionPreset(key) {
   const preset = SESSION_PRESETS[key];
@@ -1459,7 +1510,6 @@ function loadSessionPreset(key) {
   simulation.pushLog("info", message);
 }
 
-
 function exportSnapshot() {
   const snapshot = simulation.createSnapshot();
   const json = JSON.stringify(snapshot, null, 2);
@@ -1509,7 +1559,6 @@ function handleSnapshotImport(event) {
   reader.readAsText(file);
   event.target.value = "";
 }
-
 function populateScenarioMenu() {
   if (!scenarioMenu) {
     return;
@@ -1549,7 +1598,6 @@ function populateUnitMenu() {
     unitMenu.appendChild(button);
   });
   updateUnitMenuActive(selectedUnitId);
-
 }
 
 function updateUnitMenuActive(unitId) {
@@ -1671,16 +1719,12 @@ function refreshUnitPulse(time, force = false) {
   simulation.getUnits().forEach((unit) => {
     const entry = unitPulseEntries.get(unit.id);
     if (!entry) return;
-
     const utilization = clamp(unit.utilization ?? 0, 0, 1.4);
-
     const normalizedLoad = Math.min(utilization, 1);
     entry.loadFill.style.width = `${(normalizedLoad * 100).toFixed(1)}%`;
     entry.loadFill.style.background = getLoadGradient(normalizedLoad, utilization > 1);
     entry.loadValue.textContent = `${Math.round(utilization * 100)}%`;
-
     const integrity = clamp(unit.integrity ?? 0, 0, 1);
-
     entry.integrityFill.style.width = `${(integrity * 100).toFixed(1)}%`;
     entry.integrityFill.style.background = getIntegrityGradient(integrity);
     entry.integrityValue.textContent = `${Math.round(integrity * 100)}%`;
@@ -1997,7 +2041,6 @@ function updateMenuToggle(running) {
   if (!menuToggle) return;
   menuToggle.textContent = running ? "Pause" : "Resume";
   menuToggle.setAttribute("aria-pressed", running ? "false" : "true");
-
 }
 
 function buildProcessLegend() {
@@ -2024,7 +2067,6 @@ function buildProcessLegend() {
     item.setAttribute("role", "button");
     item.tabIndex = 0;
     const name = document.createElement("span");
-
     name.textContent = entry.name || unitId;
     item.appendChild(name);
     const summary = document.createElement("small");
@@ -2046,7 +2088,6 @@ function buildProcessLegend() {
         clearPipelineHighlight();
       }
     });
-
     item.addEventListener("click", () => {
       setSelectedUnit(unitId);
       ui.selectUnit(unitId);
@@ -2058,13 +2099,11 @@ function buildProcessLegend() {
         ui.selectUnit(unitId);
       }
     });
-
     list.appendChild(item);
   });
   legend.appendChild(list);
   mapStatusPanel.appendChild(legend);
 }
-
 
 function highlightPipelinesForUnit(unitId) {
   if (!unitId) {
@@ -2104,7 +2143,6 @@ function handleToolbarCommand(command) {
         "Inspection window is mostly blank in the original prototype — guidance comes from the Tour Book."
       );
       break;
-
     case "build-road":
       simulation.dispatchLogisticsConvoy();
       break;
@@ -2117,7 +2155,6 @@ function handleToolbarCommand(command) {
     }
     case "bulldoze":
       simulation.scheduleTurnaround(selectedUnitId);
-
       break;
     default:
       break;
@@ -2131,7 +2168,6 @@ function renderPrototypeNotes() {
   prototypeNotes.innerHTML = "";
   const history = document.createElement("p");
   history.textContent =
-
     "Recovered Richmond interface now wires convoy drills, pipeline bypasses, and scenario loads directly into the edit console.";
   const placeholders = document.createElement("ul");
   placeholders.className = "prototype-list";
@@ -2139,7 +2175,6 @@ function renderPrototypeNotes() {
     "Session → Load Old/New drop you into curated Chevron training scenarios with different bottlenecks to solve.",
     "ROAD dispatches a truck convoy to bleed down whichever product tanks are overflowing the most.",
     "PIPE stages a temporary bypass for the selected unit’s feed, while BULLDOZE schedules a turnaround to restore integrity.",
-
   ].forEach((line) => {
     const item = document.createElement("li");
     item.textContent = line;
@@ -2169,5 +2204,4 @@ function buildUnitConnectionIndex(topology) {
   });
   return map;
 }
-
 

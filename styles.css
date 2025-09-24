@@ -279,7 +279,6 @@ body {
   color: #f5f9ff;
 }
 
-
 .toolbar-button.ghost {
   opacity: 0.65;
   font-style: italic;
@@ -302,7 +301,6 @@ body {
   position: relative;
   flex: 1 1 560px;
   min-height: 480px;
-
   border: 3px solid #0f1828;
   box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.35);
   background: #061020;
@@ -322,7 +320,6 @@ body {
 }
 
 #scene-container canvas {
-
   image-rendering: pixelated;
   filter: saturate(1.05) contrast(1.05);
 }
@@ -332,7 +329,6 @@ body {
   height: 100%;
   display: block;
   background: radial-gradient(circle at 50% 20%, rgba(88, 126, 180, 0.2), transparent 60%), #0b1626;
-
 }
 
 .map-status {
@@ -348,7 +344,6 @@ body {
   font-family: "Inconsolata", monospace;
   min-height: 160px;
   overflow-y: auto;
-
 }
 
 .map-status h3 {
@@ -382,7 +377,6 @@ body {
   flex-direction: column;
   gap: 4px;
 }
-
 
 #unit-pulse {
   list-style: none;
@@ -522,7 +516,6 @@ body {
   color: rgba(198, 224, 255, 0.85);
 }
 
-
 #process-legend {
   border-top: 1px solid rgba(96, 136, 196, 0.35);
   margin-top: 6px;
@@ -585,7 +578,6 @@ body {
   color: rgba(180, 206, 247, 0.75);
 }
 
-
 .pulse-entry {
   background: linear-gradient(180deg, rgba(18, 30, 46, 0.94), rgba(9, 14, 22, 0.94));
   border: 1px solid rgba(94, 144, 212, 0.4);
@@ -619,7 +611,6 @@ body {
   border-color: rgba(144, 184, 238, 0.55);
   box-shadow: inset 0 0 0 1px rgba(214, 232, 255, 0.08);
 }
-
 
 .pulse-entry.overload {
   border-color: rgba(255, 159, 90, 0.6);
@@ -670,7 +661,6 @@ body {
 .pulse-entry.offline .pulse-status {
   color: rgba(255, 169, 150, 0.92);
 }
-
 
 .pulse-entry.standby .pulse-status {
   color: rgba(180, 210, 255, 0.9);
@@ -730,11 +720,9 @@ body {
   color: rgba(255, 177, 168, 0.86);
 }
 
-
 .pulse-entry.standby .pulse-footer {
   color: rgba(182, 208, 245, 0.85);
 }
-
 
 @media (max-width: 1180px) {
   #unit-pulse {
