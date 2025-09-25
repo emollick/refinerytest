@@ -1647,78 +1647,14 @@ _centeredOffsets(zoom) {
   return { offsetX, offsetY };
 }
 _ensureCameraVisible() {
-  if (!this.mapBounds) {
-    return;
-  }
-  const { minX, maxX, minY, maxY } = this.mapBounds;
-  const { zoom, offsetX, offsetY } = this.camera;
-  const margin = 24;
-  const left = minX * zoom + offsetX;
-  const right = maxX * zoom + offsetX;
-  const top = minY * zoom + offsetY;
-  const bottom = maxY * zoom + offsetY;
-  
-  // Add a small buffer to prevent constant triggering
-  const buffer = 2;
-  if (
-    right < margin - buffer ||
-    left > this.viewWidth - margin + buffer ||
-    bottom < margin - buffer ||
-    top > this.viewHeight - margin + buffer
-  ) {
-    this.camera.userControlled = false;
-    this._fitCameraToView({ preserveZoom: true });
-  }
+  // Disabled to prevent drift
+  return;
 }
 
+
 _stabilizeCamera() {
-    return; // Disable stabilization completely
-  if (this.camera.userControlled) {
-    if (this._clampCamera()) {
-      this._updateCameraTransform();
-    }
-    return;
-  }
-  
-  // Check if we're already at the home position
-  const atHome = 
-    Math.abs(this.camera.offsetX - this.camera.homeOffsetX) < 0.01 &&
-    Math.abs(this.camera.offsetY - this.camera.homeOffsetY) < 0.01 &&
-    Math.abs(this.camera.zoom - this.camera.homeZoom) < 0.0001;
-  
-  if (atHome) {
-    // Already at home, ensure exact values and don't update
-    this.camera.offsetX = this.camera.homeOffsetX;
-    this.camera.offsetY = this.camera.homeOffsetY;
-    this.camera.zoom = this.camera.homeZoom;
-    return;
-  }
-  
-  // We need to move toward home
-  const deltaX = this.camera.homeOffsetX - this.camera.offsetX;
-  const deltaY = this.camera.homeOffsetY - this.camera.offsetY;
-  const deltaZoom = this.camera.homeZoom - this.camera.zoom;
-  
-  // Snap when very close
-  if (Math.abs(deltaX) < 1) {
-    this.camera.offsetX = this.camera.homeOffsetX;
-  } else {
-    this.camera.offsetX += deltaX * 0.15;
-  }
-  
-  if (Math.abs(deltaY) < 1) {
-    this.camera.offsetY = this.camera.homeOffsetY;
-  } else {
-    this.camera.offsetY += deltaY * 0.15;
-  }
-  
-  if (Math.abs(deltaZoom) < 0.01) {
-    this.camera.zoom = this.camera.homeZoom;
-  } else {
-    this.camera.zoom += deltaZoom * 0.15;
-  }
-  
-  this._updateCameraTransform();
+  // Completely disabled - no camera stabilization
+  return;
 }
 
 beginPan(screenX, screenY) {
