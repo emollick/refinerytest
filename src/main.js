@@ -265,6 +265,9 @@ class TileRenderer {
       "aria-hidden": "true",
     });
     this.container.appendChild(this.svg);
+    this.svg.style.touchAction = "none";               // prevent browser scrolling/gestures
+    this.svg.setAttribute("shape-rendering", "crispEdges"); // also helps retro look
+    this.svg.style.imageRendering = "pixelated";
 
     this.worldGroup = createSvgElement("g", { class: "map-world" });
     this.svg.appendChild(this.worldGroup);
@@ -500,7 +503,8 @@ resetView() {
   this.camera.zoom = this.camera.homeZoom;
   this.camera.offsetX = this.camera.homeOffsetX;
   this.camera.offsetY = this.camera.homeOffsetY;
-  
+  this._clampCamera();               // <— add this
+
   this._updateCameraTransform();
 }
 
@@ -1947,7 +1951,7 @@ function darkenColor(baseHex, amount) {
   return mixColor(baseHex, "#000000", amount);
 }
 
-const renderer = new TileRenderer(sceneContainer, simulation, unitConfigs, pipelineConfigs);
+const renderer = new TileRenderer(mapViewport, simulation, unitConfigs, pipelineConfigs);
 const surface = renderer.getSurface();
 
 const unitPulseEntries = new Map();
@@ -2157,7 +2161,6 @@ if ("ResizeObserver" in window) {
   resizeObserver.observe(mapViewport);
 }
 
-renderer.resizeToContainer(mapViewport);
 
 surface.addEventListener("mousemove", (event) => {
   if (typeof renderer.isPanning === "function" && renderer.isPanning()) {
@@ -2187,17 +2190,19 @@ surface.addEventListener("mouseleave", () => {
 });
 
 surface.addEventListener("pointerdown", (event) => {
-  if (event.button !== 0) {
-    return;
-  }
+  if (event.button !== 0) return;
+  event.preventDefault(); // stop text selection/page scroll
+
   const rect = surface.getBoundingClientRect();
   const pointerX = (event.clientX - rect.left) * renderer.deviceScaleX;
   const pointerY = (event.clientY - rect.top) * renderer.deviceScaleY;
+
   panPointerId = event.pointerId;
   panStart = { x: pointerX, y: pointerY };
   panMoved = false;
   surface.setPointerCapture(event.pointerId);
 });
+
 
 surface.addEventListener("pointermove", (event) => {
   if (panPointerId !== event.pointerId) {
