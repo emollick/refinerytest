@@ -30,12 +30,27 @@ const flowToggleButton = menuBar?.querySelector('[data-action="view-toggle-flow"
 const calloutShelf = document.getElementById("alert-callouts");
 const mapStatusPanel = document.querySelector(".map-status");
 
-sceneContainer.innerHTML = "";
 
 /* ------------------------- sim + ui ------------------------- */
 const simulation = new RefinerySimulation();
-const ui = new UIController(simulation);
+
+// 🔧 Create the map FIRST so it paints even if UI fails
+const renderer = new CanvasRenderer(mapViewport, simulation, unitConfigs, pipelineConfigs);
+const surface  = renderer.getSurface();
+
+// 🔧 Make UI initialization non‑blocking if any DOM id is missing
+let ui;
+try {
+  ui = new UIController(simulation);
+} catch (err) {
+  console.warn("[ui] UIController failed; running with no‑op UI", err);
+  ui = {
+    setModeBadge(){}, refreshControls(){}, setScenario(){}, setRunning(){},
+    selectUnit(){}, update(){}, elements:{}, onRunningChange:null, onReset:null
+  };
+}
 if (typeof ui.setModeBadge === "function") ui.setModeBadge("AUTO");
+
 
 /* ------------------------- configs (unchanged) ------------------------- */
 const unitConfigs = [
@@ -187,29 +202,32 @@ class CanvasRenderer {
 
 resizeToContainer(container) {
   const rect = container.getBoundingClientRect();
+
+  // 🔧 If the layout collapsed (flex/grid with no explicit height), give the container a floor.
+  if ((rect.height|0) < 80) {
+    container.style.minHeight = "480px";
+  }
+
   const w = Math.max(720, Math.floor(rect.width || 0));
   const h = Math.max(480, Math.floor(rect.height || 0));
 
   const dpr = Math.max(1, window.devicePixelRatio || 1);
 
-  // Set the device pixel buffer size
+  // device pixel buffer
   this.canvas.width  = Math.floor(w * dpr);
   this.canvas.height = Math.floor(h * dpr);
 
-  // 🔧 KEY FIX: also set CSS pixel size so the canvas is visible even if the
-  // container has no explicit height
+  // CSS pixels so it's visible even if container lacked height before
   this.canvas.style.width  = `${w}px`;
   this.canvas.style.height = `${h}px`;
 
   this.displayW = w;
   this.displayH = h;
 
-  // pointer and wheel math use device pixels
   this.dpr = dpr;
   this.deviceScaleX = dpr;
   this.deviceScaleY = dpr;
 
-  // Keep centered until the user moves the camera
   if (!this.camera.user) {
     const { ox, oy, zoom } = this._centeredAt(this.camera.zoom);
     this.camera.ox = ox;
@@ -219,6 +237,7 @@ resizeToContainer(container) {
     this.camera.homeZoom = zoom;
   }
 }
+
 
 
   resetView(){
@@ -715,8 +734,6 @@ function hexWithAlpha(hex, alpha){
 /* ===========================  APP WIRING  ========================== */
 /* =================================================================== */
 
-const renderer = new CanvasRenderer(mapViewport, simulation, unitConfigs, pipelineConfigs);
-const surface = renderer.getSurface();
 
 /* ------------------------------ UI state --------------------------- */
 const unitPulseEntries = new Map();
