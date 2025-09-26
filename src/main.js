@@ -14,45 +14,39 @@ function blend(a, b, t) {
   return `#${((1 << 24) + (r << 16) + (g << 8) + bl).toString(16).slice(1)}`;
 }
 
-/* ------------------------- DOM refs you already had ------------------------- */
-const mapViewport = document.getElementById("map-viewport");
-const sceneContainer = document.getElementById("scene-container");
-const menuBar = document.getElementById("menu-bar");
-const menuToggle = document.getElementById("menu-toggle");
-const scenarioMenu = document.getElementById("scenario-menu");
-const unitMenu = document.getElementById("unit-menu");
-const importInput = document.getElementById("session-import-input");
-const unitPulseList = document.getElementById("unit-pulse");
-const mapToolbar = document.querySelector(".map-toolbar");
-const prototypeNotes = document.getElementById("prototype-notes");
-const gridToggleButton = menuBar?.querySelector('[data-action="view-toggle-grid"]');
-const flowToggleButton = menuBar?.querySelector('[data-action="view-toggle-flow"]');
-const calloutShelf = document.getElementById("alert-callouts");
-const mapStatusPanel = document.querySelector(".map-status");
+/* ------------------------- DOM refs (safe) ------------------------- */
+// 🔧 ensure a visible viewport exists even if #map-viewport isn't in HTML yet
+const mapViewport =
+  document.getElementById("map-viewport") ||
+  (() => {
+    const el = document.createElement("div");
+    el.id = "map-viewport";
+    el.style.minHeight = "480px";
+    el.style.width = "100%";
+    el.style.background = "#0b1018";
+    document.body.prepend(el);
+    return el;
+  })();
 
+const sceneContainer = document.getElementById("scene-container") || null;
+const menuBar = document.getElementById("menu-bar") || null;
+const menuToggle = document.getElementById("menu-toggle") || null;
+const scenarioMenu = document.getElementById("scenario-menu") || null;
+const unitMenu = document.getElementById("unit-menu") || null;
+const importInput = document.getElementById("session-import-input") || null;
+const unitPulseList = document.getElementById("unit-pulse") || null;
+const mapToolbar = document.querySelector(".map-toolbar") || null;
+const prototypeNotes = document.getElementById("prototype-notes") || null;
+const calloutShelf = document.getElementById("alert-callouts") || null;
+const mapStatusPanel = document.querySelector(".map-status") || null;
 
-/* ------------------------- sim + ui ------------------------- */
-const simulation = new RefinerySimulation();
+// Toggle buttons (existence optional)
+const gridToggleButton = menuBar?.querySelector('[data-action="view-toggle-grid"]') || null;
+const flowToggleButton = menuBar?.querySelector('[data-action="view-toggle-flow"]') || null;    // pipelines
+const pipeToggleButton = menuBar?.querySelector('[data-action="view-toggle-pipes"]') || null;    // alias
+const roadToggleButton = menuBar?.querySelector('[data-action="view-toggle-roads"]') || null;
 
-// 🔧 Create the map FIRST so it paints even if UI fails
-const renderer = new CanvasRenderer(mapViewport, simulation, unitConfigs, pipelineConfigs);
-const surface  = renderer.getSurface();
-
-// 🔧 Make UI initialization non‑blocking if any DOM id is missing
-let ui;
-try {
-  ui = new UIController(simulation);
-} catch (err) {
-  console.warn("[ui] UIController failed; running with no‑op UI", err);
-  ui = {
-    setModeBadge(){}, refreshControls(){}, setScenario(){}, setRunning(){},
-    selectUnit(){}, update(){}, elements:{}, onRunningChange:null, onReset:null
-  };
-}
-if (typeof ui.setModeBadge === "function") ui.setModeBadge("AUTO");
-
-
-/* ------------------------- configs (unchanged) ------------------------- */
+/* ------------------------- configs ------------------------- */
 const unitConfigs = [
   { id: "distillation", name: "Crude Distillation", tileX: 6,  tileY: 3,  width: 3, height: 4, color: 0xbec9df, accent: 0xf3cf73, accentAlt: 0xe8933d, style: "towers" },
   { id: "reformer",     name: "Naphtha Reformer",   tileX: 3,  tileY: 6,  width: 2, height: 3, color: 0xd6aa80, accent: 0x8c5a31, accentAlt: 0xf2d5a4, style: "rect"   },
@@ -71,7 +65,7 @@ const pipelineConfigs = [
 ];
 
 /* ------------------------- topology helpers ------------------------- */
-const processTopology = simulation.getProcessTopology?.() || {};
+let processTopology = {};
 function buildUnitConnectionIndex(topology) {
   const map = new Map();
   Object.entries(topology || {}).forEach(([unitId, entry]) => {
@@ -82,7 +76,7 @@ function buildUnitConnectionIndex(topology) {
   });
   return map;
 }
-const unitConnectionIndex = buildUnitConnectionIndex(processTopology);
+let unitConnectionIndex = new Map();
 
 /* =================================================================== */
 /* =========================  CANVAS RENDERER  ======================== */
@@ -124,7 +118,7 @@ class CanvasRenderer {
       zoom: 1,
       min: 0.65,
       max: 2.8,
-      ox: 0, oy: 0,            // offsets in device pixels
+      ox: 0, oy: 0,
       homeZoom: 1,
       homeOX: 0, homeOY: 0,
       user: false
@@ -133,7 +127,8 @@ class CanvasRenderer {
     // state
     this.time = 0;
     this.gridVisible = true;
-    this.flowVisible = true;
+    this.flowVisible = true;   // pipelines on/off
+    this.roadsVisible = true;  // roads/walkways on/off
     this.highlighted = new Set();
     this.selectedUnitId = null;
     this.hoverUnitId = null;
@@ -190,55 +185,54 @@ class CanvasRenderer {
     this.canvas.style.imageRendering = "pixelated";
   }
 
-  /* ------------ public surface (used by your UI code) ------------ */
+  /* ------------ public surface ------------ */
   getSurface() { return this.canvas; }
   setGridVisible(v){ this.gridVisible = v; }
   setFlowVisible(v){ this.flowVisible = v; }
+  setRoadsVisible(v){ this.roadsVisible = v; }
   cyclePalette(){ this.paletteIndex = (this.paletteIndex + 1) % this.palettes.length; this._makeDitherTextures(); }
   setHighlightedPipelines(ids){ this.highlighted = new Set(ids); }
   setSelectedUnit(id){ this.selectedUnitId = id; }
   setHoverUnit(id){ this.hoverUnitId = id; }
   setPointer(x,y,a){ this.pointer = { x, y, active:a }; }
 
-resizeToContainer(container) {
-  const rect = container.getBoundingClientRect();
+  resizeToContainer(container) {
+    const rect = container.getBoundingClientRect();
 
-  // 🔧 If the layout collapsed (flex/grid with no explicit height), give the container a floor.
-  if ((rect.height|0) < 80) {
-    container.style.minHeight = "480px";
+    // 🔧 If the layout collapsed (flex/grid with no explicit height), give the container a floor.
+    if ((rect.height|0) < 80) {
+      container.style.minHeight = "480px";
+    }
+
+    const w = Math.max(720, Math.floor(rect.width || 0));
+    const h = Math.max(480, Math.floor(rect.height || 0));
+
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+
+    // device pixel buffer
+    this.canvas.width  = Math.floor(w * dpr);
+    this.canvas.height = Math.floor(h * dpr);
+
+    // CSS pixels so it's visible even if container lacked height before
+    this.canvas.style.width  = `${w}px`;
+    this.canvas.style.height = `${h}px`;
+
+    this.displayW = w;
+    this.displayH = h;
+
+    this.dpr = dpr;
+    this.deviceScaleX = dpr;
+    this.deviceScaleY = dpr;
+
+    if (!this.camera.user) {
+      const { ox, oy, zoom } = this._centeredAt(this.camera.zoom);
+      this.camera.ox = ox;
+      this.camera.oy = oy;
+      this.camera.homeOX = ox;
+      this.camera.homeOY = oy;
+      this.camera.homeZoom = zoom;
+    }
   }
-
-  const w = Math.max(720, Math.floor(rect.width || 0));
-  const h = Math.max(480, Math.floor(rect.height || 0));
-
-  const dpr = Math.max(1, window.devicePixelRatio || 1);
-
-  // device pixel buffer
-  this.canvas.width  = Math.floor(w * dpr);
-  this.canvas.height = Math.floor(h * dpr);
-
-  // CSS pixels so it's visible even if container lacked height before
-  this.canvas.style.width  = `${w}px`;
-  this.canvas.style.height = `${h}px`;
-
-  this.displayW = w;
-  this.displayH = h;
-
-  this.dpr = dpr;
-  this.deviceScaleX = dpr;
-  this.deviceScaleY = dpr;
-
-  if (!this.camera.user) {
-    const { ox, oy, zoom } = this._centeredAt(this.camera.zoom);
-    this.camera.ox = ox;
-    this.camera.oy = oy;
-    this.camera.homeOX = ox;
-    this.camera.homeOY = oy;
-    this.camera.homeZoom = zoom;
-  }
-}
-
-
 
   resetView(){
     this.camera.user = false;
@@ -264,7 +258,7 @@ resizeToContainer(container) {
       const withinY = wy >= u.tileY - 0.25 && wy <= u.tileY + u.height - 0.1;
       if (withinX && withinY) return u;
     }
-    return null;
+       return null;
   }
 
   beginPan(sx, sy){
@@ -365,8 +359,8 @@ resizeToContainer(container) {
         ctx.fillStyle = hexWithAlpha(sh, type==="water" ? 0.4 : 0.55);
         pathPolygon(ctx, this._shadowPoly(p)); ctx.fill();
 
-        // roads/walkways after ground
-        if (type === "road"){
+        // roads/walkways after ground (toggleable)
+        if (this.roadsVisible && type === "road"){
           const poly = this._roadPoly(x, y, orient || "ew");
           ctx.fillStyle = pal.road;
           pathPolygon(ctx, poly); ctx.fill();
@@ -376,7 +370,7 @@ resizeToContainer(container) {
           ctx.save(); ctx.lineWidth = 1.6; ctx.setLineDash([6,6]); ctx.lineCap = "round";
           ctx.strokeStyle = pal.roadLine; ctx.beginPath(); ctx.moveTo(s[0], s[1]); ctx.lineTo(e[0], e[1]); ctx.stroke(); ctx.restore();
         }
-        if (type === "walkway"){
+        if (this.roadsVisible && type === "walkway"){
           const poly = this._walkwayPoly(x,y);
           ctx.fillStyle = pal.walkway; pathPolygon(ctx, poly); ctx.fill();
         }
@@ -397,11 +391,13 @@ resizeToContainer(container) {
   _drawGrid(ctx, pal){
     ctx.strokeStyle = pal.grid; ctx.lineWidth = 1;
     for (let y=0; y<this.rows; y++)
-      for (let x=0; x<this.cols; x++)
-        { ctx.beginPath(); pathPolygon(ctx, this._tileDiamond(x,y)); ctx.stroke(); }
+      for (let x=0; x<this.cols; x++){
+        ctx.beginPath(); pathPolygon(ctx, this._tileDiamond(x,y)); ctx.stroke();
+      }
   }
 
   _drawPipelines(ctx, pal, flows){
+    if (!this.flowVisible) return; // 🔧 Hide the entire pipeline network when disabled
     const t = this.time;
     for (const pipe of this.pipelineDefs){
       // base stroke
@@ -421,21 +417,21 @@ resizeToContainer(container) {
       const ratio = pipe.capacity ? clamp(v / pipe.capacity, 0, 1.5) : 0;
       const highlighted = this.highlighted.has(pipe.id);
       const intensity = highlighted ? 1 : clamp(ratio, 0.2, 0.9);
-      if (this.flowVisible) {
-        ctx.save();
-        ctx.strokeStyle = pal.pipeGlow;
-        ctx.lineWidth = highlighted ? 10 : 7;
-        ctx.globalAlpha = 0.12 + intensity * 0.6;
-        ctx.setLineDash([18,22]);
-        ctx.lineDashOffset = -((t * 60 + (pipe.phase||0) * 40) % 180);
-        ctx.beginPath();
-        pipe.path.forEach((pt,i) => {
-          const p = this._tileToScreen(pt.x, pt.y);
-          if (i===0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
-        });
-        ctx.stroke();
-        ctx.restore();
-      }
+
+      ctx.save();
+      ctx.strokeStyle = pal.pipeGlow;
+      ctx.lineWidth = highlighted ? 10 : 7;
+      ctx.globalAlpha = 0.12 + intensity * 0.6;
+      ctx.setLineDash([18,22]);
+      ctx.lineDashOffset = -((t * 60 + (pipe.phase||0) * 40) % 180);
+      ctx.beginPath();
+      pipe.path.forEach((pt,i) => {
+        const p = this._tileToScreen(pt.x, pt.y);
+        if (i===0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+      });
+      ctx.stroke();
+      ctx.restore();
+
       ctx.globalAlpha = 1;
     }
   }
@@ -712,10 +708,7 @@ resizeToContainer(container) {
 
 /* ----------------------- canvas geometry helpers ------------------- */
 function pathPolygon(ctx, pts){ ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (let i=1;i<pts.length;i++) ctx.lineTo(pts[i][0], pts[i][1]); ctx.closePath(); }
-function diamond(cx, cy, w, h){
-  const hw=w/2, hh=h/2;
-  return [[cx,cy-hh],[cx+hw,cy],[cx,cy+hh],[cx-hw,cy]];
-}
+function diamond(cx, cy, w, h){ const hw=w/2, hh=h/2; return [[cx,cy-hh],[cx+hw,cy],[cx,cy+hh],[cx-hw,cy]]; }
 function roundRect(ctx, x,y,w,h,r){
   ctx.beginPath();
   ctx.moveTo(x+r,y);
@@ -734,6 +727,32 @@ function hexWithAlpha(hex, alpha){
 /* ===========================  APP WIRING  ========================== */
 /* =================================================================== */
 
+/* ------------------------- sim + ui (correct order) ------------------------- */
+const simulation = new RefinerySimulation();
+
+// build topology now that simulation exists
+function refreshTopologyAndIndex(){
+  processTopology = simulation.getProcessTopology?.() || {};
+  unitConnectionIndex = buildUnitConnectionIndex(processTopology);
+}
+refreshTopologyAndIndex();
+
+// Create map *after* class definition and configs
+const renderer = new CanvasRenderer(mapViewport, simulation, unitConfigs, pipelineConfigs);
+const surface  = renderer.getSurface();
+
+// UI with graceful fallback if UIController cannot bind (missing DOM, etc.)
+let ui;
+try {
+  ui = new UIController(simulation);
+} catch (err) {
+  console.warn("[ui] UIController failed; running with no‑op UI", err);
+  ui = {
+    setModeBadge(){}, refreshControls(){}, setScenario(){}, setRunning(){},
+    selectUnit(){}, update(){}, elements:{}, onRunningChange:null, onReset:null
+  };
+}
+if (typeof ui.setModeBadge === "function") ui.setModeBadge("AUTO");
 
 /* ------------------------------ UI state --------------------------- */
 const unitPulseEntries = new Map();
@@ -744,9 +763,8 @@ let lastPulseRefresh = 0;
 let gridVisible = true;
 let flowOverlayVisible = true;
 let activeMenu = null;
-let panPointerId = null;
 
-/* ------------------------- presets & menus (unchanged) ------------- */
+/* ------------------------- presets & menus ------------------------- */
 const PRESETS = {
   auto:    { label:"AUTO",   crude:120, focus:0.5,  maintenance:0.65, safety:0.45, environment:0.35, log:"Operator returned controls to automatic balancing." },
   manual:  { label:"MANUAL", crude:180, focus:0.68, maintenance:0.45, safety:0.36, environment:0.22, log:"Manual push: throughput prioritized for gasoline blending." },
@@ -768,36 +786,51 @@ const SESSION_PRESETS = {
             marketStress:0.3, timeMinutes:60*3, log:"Modernization drill loaded — chase export contracts without breaking reliability." }
 };
 
-/* ----------------------------- toolbar wiring (unchanged) ---------- */
+/* ----------------------------- toolbar wiring ---------------------- */
 const toolbarPresetButtons = document.querySelectorAll("[data-preset]");
 const toolbarUnitButtons   = document.querySelectorAll("[data-unit-target]");
 const toolbarScenarioButtons = document.querySelectorAll("[data-scenario]");
 toolbarPresetButtons.forEach(b => b.addEventListener("click", () => applyPreset(b.dataset.preset)));
 toolbarUnitButtons.forEach(b => b.addEventListener("click", () => { const t=b.dataset.unitTarget||null; setSelectedUnit(t); ui.selectUnit(t); }));
-toolbarScenarioButtons.forEach(b => b.addEventListener("click", () => { const s=b.dataset.scenario; if (!s) return; simulation.applyScenario(s); ui.setScenario(s); updateScenarioButtons(s); }));
+toolbarScenarioButtons.forEach(b => b.addEventListener("click", () => {
+  const s=b.dataset.scenario; if (!s) return;
+  simulation.applyScenario(s); ui.setScenario(s);
+  refreshTopologyAndIndex();            // 🔧 keep legend/highlights in sync
+  updateScenarioButtons(s);
+  rebuildProcessLegend();               // reflect any scenario-specific topology
+}));
 
 const sliderInputs = document.querySelectorAll('#hud input[type="range"]');
 sliderInputs.forEach(input => input.addEventListener("input", () => {
   updatePresetButtons(null); activePreset=null; if (typeof ui.setModeBadge === "function") ui.setModeBadge("CUSTOM");
 }));
 
-if (ui.elements?.scenario) ui.elements.scenario.addEventListener("change", e => updateScenarioButtons(e.target.value));
+if (ui.elements?.scenario) {
+  ui.elements.scenario.addEventListener("change", e => {
+    updateScenarioButtons(e.target.value);
+    refreshTopologyAndIndex();
+    rebuildProcessLegend();
+  });
+}
 
 ui.onRunningChange = (running) => updateMenuToggle(running);
 ui.onReset = () => performSimulationReset();
 
+/* ------------------------------ boot ------------------------------- */
 applyPreset("auto", { silent: true });
+refreshTopologyAndIndex();
 updatePresetButtons("auto");
 updateScenarioButtons(simulation.activeScenarioKey);
 updateUnitButtons(null);
 ui.refreshControls();
 initializeMenus();
 updateMenuToggle(simulation.running);
-setGridVisibility(gridVisible);
-setFlowVisibility(flowOverlayVisible);
+setGridVisibility(true);
+setFlowVisibility(true);       // pipelines shown by default
+setRoadVisibility(true);       // roads/walkways shown by default
 populateScenarioMenu();
 populateUnitMenu();
-buildProcessLegend();
+rebuildProcessLegend();
 initializeUnitPulseList();
 renderPrototypeNotes();
 
@@ -816,6 +849,9 @@ if ("ResizeObserver" in window) {
   const r = mapViewport.getBoundingClientRect();
   lastW=Math.floor(r.width); lastH=Math.floor(r.height);
   ro.observe(mapViewport);
+} else {
+  // Fallback
+  window.addEventListener("resize", () => renderer.resizeToContainer(mapViewport));
 }
 
 /* ------------------------------- input ----------------------------- */
@@ -841,14 +877,14 @@ surface.addEventListener("mouseleave", () => {
 });
 
 // drag to pan
-let panMoved = false, panStart = {x:0,y:0};
+let panMoved = false;
 surface.addEventListener("pointerdown", (e) => {
   if (e.button !== 0) return;
   e.preventDefault();
   const rect = surface.getBoundingClientRect();
   const px = (e.clientX - rect.left) * renderer.deviceScaleX;
   const py = (e.clientY - rect.top)  * renderer.deviceScaleY;
-  panStart = { x:px, y:py }; panMoved=false;
+  panMoved=false;
   surface.setPointerCapture(e.pointerId);
   renderer.beginPan(px, py);
 });
@@ -911,7 +947,7 @@ function animate(now){
 }
 requestAnimationFrame(animate);
 
-/* --------------------------- app helpers (unchanged logic) --------- */
+/* --------------------------- app helpers --------------------------- */
 function applyPreset(name, options = {}){
   const p = PRESETS[name]; if (!p) return;
   simulation.setParam("crudeIntake", p.crude);
@@ -938,8 +974,11 @@ function initializeMenus(){
     if (!entry || !menuBar.contains(entry)) return;
     e.preventDefault();
     const action = entry.dataset.action, scenario = entry.dataset.scenario, unitId = entry.dataset.unit;
-    if (action) handleMenuAction(action, entry);
-    else if (scenario) { simulation.applyScenario(scenario); ui.setScenario(scenario); updateScenarioButtons(scenario); }
+    if (action) handleMenuAction(action);
+    else if (scenario) {
+      simulation.applyScenario(scenario); ui.setScenario(scenario); updateScenarioButtons(scenario);
+      refreshTopologyAndIndex(); rebuildProcessLegend();
+    }
     else if (unitId) { setSelectedUnit(unitId); ui.selectUnit(unitId); }
     closeMenus();
   });
@@ -971,24 +1010,44 @@ function handleMenuAction(action){
     case "session-load-old":  loadSessionPreset("legacy"); break;
     case "session-load-new":  loadSessionPreset("modern"); break;
     case "view-center": renderer.resetView(); simulation.pushLog("info","Viewport recentered over refinery layout."); break;
-    case "view-toggle-grid": { const n=!gridVisible; setGridVisibility(n); simulation.pushLog("info", n?"Grid overlay enabled.":"Grid overlay hidden."); break; }
-    case "view-toggle-flow": { const n=!flowOverlayVisible; setFlowVisibility(n); simulation.pushLog("info", n?"Process flow glow enabled.":"Process flow glow hidden."); break; }
+    case "view-toggle-grid": { const n=!renderer.gridVisible; setGridVisibility(n); simulation.pushLog("info", n?"Grid overlay enabled.":"Grid overlay hidden."); break; }
+    case "view-toggle-flow":
+    case "view-toggle-pipes": { const n=!renderer.flowVisible; setFlowVisibility(n); simulation.pushLog("info", n?"Pipelines shown.":"Pipelines hidden."); break; }
+    case "view-toggle-roads": { const n=!renderer.roadsVisible; setRoadVisibility(n); simulation.pushLog("info", n?"Roads/walkways shown.":"Roads/walkways hidden."); break; }
     case "view-cycle-light":  renderer.cyclePalette(); simulation.pushLog("info","Palette cycled — channeling SimFarm and SimCity swatches."); break;
     default: break;
   }
 }
-function setGridVisibility(v){ gridVisible=v; renderer.setGridVisible(v); updateToggleButton(gridToggleButton,v,"Hide Grid Overlay","Show Grid Overlay"); }
-function setFlowVisibility(v){ flowOverlayVisible=v; renderer.setFlowVisible(v); updateToggleButton(flowToggleButton,v,"Hide Flow Glow","Show Flow Glow"); }
-function updateToggleButton(btn, vis, hideLabel, showLabel){ if (!btn) return; btn.dataset.state = vis?"on":"off"; btn.textContent = vis?hideLabel:showLabel; }
+
+function setGridVisibility(v){
+  renderer.setGridVisible(v);
+  updateToggleButton(gridToggleButton,v,"Hide Grid Overlay","Show Grid Overlay");
+}
+function setFlowVisibility(v){
+  renderer.setFlowVisible(v);
+  // prefer "Pipelines" wording; fallback button gets updated if present
+  updateToggleButton(flowToggleButton || pipeToggleButton, v, "Hide Pipelines", "Show Pipelines");
+}
+function setRoadVisibility(v){
+  renderer.setRoadsVisible(v);
+  updateToggleButton(roadToggleButton, v, "Hide Roads/Walkways", "Show Roads/Walkways");
+}
+function updateToggleButton(btn, vis, hideLabel, showLabel){
+  if (!btn) return;
+  btn.dataset.state = vis?"on":"off";
+  btn.textContent = vis ? hideLabel : showLabel;
+}
 
 function performSimulationReset(){
   simulation.reset();
   applyPreset("auto",{silent:true}); activePreset="auto";
+  refreshTopologyAndIndex();
   updatePresetButtons("auto"); updateScenarioButtons(simulation.activeScenarioKey);
   ui.refreshControls(); ui.setScenario(simulation.activeScenarioKey);
   if (typeof ui.setModeBadge==="function") ui.setModeBadge("AUTO");
   setSelectedUnit(null); ui.selectUnit(null); updateUnitButtons(null);
   populateUnitMenu(); ui.setRunning(true);
+  rebuildProcessLegend();
 }
 
 function loadSessionPreset(key){
@@ -1050,6 +1109,8 @@ function loadSessionPreset(key){
   ui.setRunning(simulation.running); if (typeof ui.setModeBadge==="function") ui.setModeBadge("CUSTOM");
   updateMenuToggle(simulation.running);
   renderer.resetView?.();
+  refreshTopologyAndIndex();
+  rebuildProcessLegend();
   simulation.pushLog("info", p.log || "Session preset loaded.");
 }
 
@@ -1075,6 +1136,8 @@ function handleSnapshotImport(e){
       setSelectedUnit(null); ui.selectUnit(null); updateUnitButtons(null); populateUnitMenu();
       ui.setRunning(simulation.running); if (typeof ui.setModeBadge==="function") ui.setModeBadge("CUSTOM");
       updateMenuToggle(simulation.running);
+      refreshTopologyAndIndex();
+      rebuildProcessLegend();
       simulation.pushLog("info","Snapshot imported and applied.");
     }catch(err){ console.error("Snapshot import failed", err); simulation.pushLog("warning","Snapshot import failed. Verify the file format."); }
   });
@@ -1105,7 +1168,10 @@ function populateUnitMenu(){
   });
   updateUnitMenuActive(selectedUnitId);
 }
-function updateUnitMenuActive(id){ if (!unitMenu) return; unitMenu.querySelectorAll(".menu-entry").forEach(e => e.classList.toggle("active", e.dataset.unit===id)); }
+function updateUnitMenuActive(id){
+  if (!unitMenu) return;
+  unitMenu.querySelectorAll(".menu-entry").forEach(e => e.classList.toggle("active", e.dataset.unit===id));
+}
 
 function buildUnitModeLookup(){
   unitModeLabels.clear();
@@ -1170,7 +1236,7 @@ function refreshUnitPulse(time, force=false){
   renderAlertCallouts();
 }
 
-/* alerts + legend (unchanged) */
+/* alerts + legend */
 function renderAlertCallouts(){
   if (!calloutShelf) return;
   const alerts = collectActiveAlerts();
@@ -1227,9 +1293,12 @@ function createAlertCallout(alert){
 }
 
 /* legend */
-function buildProcessLegend(){
-  if (!mapStatusPanel || !processTopology) return;
-  if (mapStatusPanel.querySelector("#process-legend")) return;
+function rebuildProcessLegend(){
+  if (!mapStatusPanel) return;
+  const existing = mapStatusPanel.querySelector("#process-legend");
+  if (existing) existing.remove();
+  if (!processTopology) return;
+
   const legend = document.createElement("div"); legend.id="process-legend";
   const h = document.createElement("h4"); h.textContent = "Process Flow"; legend.appendChild(h);
   const list = document.createElement("ol");
@@ -1265,7 +1334,7 @@ function setSelectedUnit(id){
   if (selectedUnitId) highlightPipelinesForUnit(selectedUnitId); else clearPipelineHighlight();
 }
 
-/* prototype notes (unchanged text) */
+/* prototype notes */
 function renderPrototypeNotes(){
   if (!prototypeNotes) return;
   prototypeNotes.innerHTML = "";
@@ -1281,7 +1350,7 @@ function renderPrototypeNotes(){
   prototypeNotes.append(history, ul);
 }
 
-/* little formatters (unchanged) */
+/* little formatters */
 function buildUnitAlertSummary(u){
   const d=u.alertDetail||u.lastIncident;
   if (d?.summary) return d.summary;
@@ -1324,4 +1393,8 @@ function formatModeLabel(k){
   if (unitModeLabels.has(k)) return unitModeLabels.get(k);
   return k.split(/\s|_/).map(s => s.charAt(0).toUpperCase()+s.slice(1)).join(" ");
 }
-function updateMenuToggle(running){ if (!menuToggle) return; menuToggle.textContent = running ? "Pause" : "Resume"; menuToggle.setAttribute("aria-pressed", running ? "false":"true"); }
+function updateMenuToggle(running){
+  if (!menuToggle) return;
+  menuToggle.textContent = running ? "Pause" : "Resume";
+  menuToggle.setAttribute("aria-pressed", running ? "false":"true");
+}
