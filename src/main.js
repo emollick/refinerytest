@@ -1,8 +1,20 @@
 import { RefinerySimulation } from "./simulation.js?v=2";
 import { UIController } from "./ui.js?v=2";
 
-const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+/* ------------------------- small helpers ------------------------- */
+const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
+const mix = (a, b, t) => a + (b - a) * t;
+const toHex = (int) => `#${int.toString(16).padStart(6, "0")}`;
+const lighten = (hex, amt) => blend(hex, "#ffffff", amt);
+const darken = (hex, amt) => blend(hex, "#000000", amt);
+function blend(a, b, t) {
+  const p = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+  const [ar, ag, ab] = p(a), [br, bg, bb] = p(b);
+  const r = Math.round(mix(ar, br, t)), g = Math.round(mix(ag, bg, t)), bl = Math.round(mix(ab, bb, t));
+  return `#${((1 << 24) + (r << 16) + (g << 8) + bl).toString(16).slice(1)}`;
+}
 
+/* ------------------------- DOM refs you already had ------------------------- */
 const mapViewport = document.getElementById("map-viewport");
 const sceneContainer = document.getElementById("scene-container");
 const menuBar = document.getElementById("menu-bar");
@@ -20,1940 +32,679 @@ const mapStatusPanel = document.querySelector(".map-status");
 
 sceneContainer.innerHTML = "";
 
+/* ------------------------- sim + ui ------------------------- */
 const simulation = new RefinerySimulation();
 const ui = new UIController(simulation);
-if (typeof ui.setModeBadge === "function") {
-  ui.setModeBadge("AUTO");
-}
+if (typeof ui.setModeBadge === "function") ui.setModeBadge("AUTO");
 
-const processTopology = simulation.getProcessTopology?.() || {};
-const unitConnectionIndex = buildUnitConnectionIndex(processTopology);
-
+/* ------------------------- configs (unchanged) ------------------------- */
 const unitConfigs = [
-  {
-    id: "distillation",
-    name: "Crude Distillation",
-    tileX: 6,
-    tileY: 3,
-    width: 3,
-    height: 4,
-    color: 0xbec9df,
-    accent: 0xf3cf73,
-    accentAlt: 0xe8933d,
-    style: "towers",
-  },
-  {
-    id: "reformer",
-    name: "Naphtha Reformer",
-    tileX: 3,
-    tileY: 6,
-    width: 2,
-    height: 3,
-    color: 0xd6aa80,
-    accent: 0x8c5a31,
-    accentAlt: 0xf2d5a4,
-    style: "rect",
-  },
-  {
-    id: "fcc",
-    name: "Catalytic Cracker",
-    tileX: 10,
-    tileY: 6,
-    width: 3,
-    height: 3,
-    color: 0xe2c568,
-    accent: 0x9a6a24,
-    accentAlt: 0xf6df9a,
-    style: "reactor",
-  },
-  {
-    id: "hydrocracker",
-    name: "Hydrocracker",
-    tileX: 3,
-    tileY: 2,
-    width: 2,
-    height: 3,
-    color: 0xb6ded0,
-    accent: 0x419a74,
-    accentAlt: 0xdaf0e8,
-    style: "towers",
-  },
-  {
-    id: "alkylation",
-    name: "Alkylation",
-    tileX: 11,
-    tileY: 2,
-    width: 2,
-    height: 3,
-    color: 0xd3b3f2,
-    accent: 0x845ec4,
-    accentAlt: 0xf3e1ff,
-    style: "rect",
-  },
-  {
-    id: "sulfur",
-    name: "Sulfur Recovery",
-    tileX: 7,
-    tileY: 9,
-    width: 2,
-    height: 2,
-    color: 0xe9edf1,
-    accent: 0x8c96a7,
-    accentAlt: 0xf7f9fb,
-    style: "support",
-  },
+  { id: "distillation", name: "Crude Distillation", tileX: 6,  tileY: 3,  width: 3, height: 4, color: 0xbec9df, accent: 0xf3cf73, accentAlt: 0xe8933d, style: "towers" },
+  { id: "reformer",     name: "Naphtha Reformer",   tileX: 3,  tileY: 6,  width: 2, height: 3, color: 0xd6aa80, accent: 0x8c5a31, accentAlt: 0xf2d5a4, style: "rect"   },
+  { id: "fcc",          name: "Catalytic Cracker",  tileX: 10, tileY: 6,  width: 3, height: 3, color: 0xe2c568, accent: 0x9a6a24, accentAlt: 0xf6df9a, style: "reactor"},
+  { id: "hydrocracker", name: "Hydrocracker",       tileX: 3,  tileY: 2,  width: 2, height: 3, color: 0xb6ded0, accent: 0x419a74, accentAlt: 0xdaf0e8, style: "towers" },
+  { id: "alkylation",   name: "Alkylation",         tileX: 11, tileY: 2,  width: 2, height: 3, color: 0xd3b3f2, accent: 0x845ec4, accentAlt: 0xf3e1ff, style: "rect"   },
+  { id: "sulfur",       name: "Sulfur Recovery",    tileX: 7,  tileY: 9,  width: 2, height: 2, color: 0xe9edf1, accent: 0x8c96a7, accentAlt: 0xf7f9fb, style: "support"},
 ];
 
 const pipelineConfigs = [
-  {
-    id: "toReformer",
-    metric: "toReformer",
-    capacity: 70,
-    color: 0x6fc2ff,
-    phase: 0,
-    path: [
-      { x: 7, y: 4.5 },
-      { x: 5, y: 4.5 },
-      { x: 5, y: 7 },
-      { x: 3.5, y: 7 },
-    ],
-  },
-  {
-    id: "toCracker",
-    metric: "toCracker",
-    capacity: 90,
-    color: 0xf7b25c,
-    phase: 1.3,
-    path: [
-      { x: 7, y: 4.5 },
-      { x: 9.5, y: 4.5 },
-      { x: 9.5, y: 7 },
-      { x: 11, y: 7 },
-    ],
-  },
-  {
-    id: "toHydrocracker",
-    metric: "toHydrocracker",
-    capacity: 70,
-    color: 0x8ee2c4,
-    phase: 2.2,
-    path: [
-      { x: 7, y: 4.5 },
-      { x: 4.5, y: 4.5 },
-      { x: 4.5, y: 3.5 },
-      { x: 3.5, y: 3.5 },
-    ],
-  },
-  {
-    id: "toAlkylation",
-    metric: "toAlkylation",
-    capacity: 45,
-    color: 0xc5a1ff,
-    phase: 2.9,
-    path: [
-      { x: 11, y: 7 },
-      { x: 12, y: 7 },
-      { x: 12, y: 3.5 },
-    ],
-  },
-  {
-    id: "toExport",
-    metric: "toExport",
-    capacity: 160,
-    color: 0x9ec8ff,
-    phase: 3.6,
-    path: [
-      { x: 7, y: 4.5 },
-      { x: 11, y: 4.5 },
-      { x: 11, y: 9.5 },
-      { x: 13.5, y: 9.5 },
-    ],
-  },
+  { id: "toReformer",      metric: "toReformer",      capacity: 70,  color: 0x6fc2ff, phase: 0,   path: [{x:7,y:4.5},{x:5,y:4.5},{x:5,y:7},{x:3.5,y:7}] },
+  { id: "toCracker",       metric: "toCracker",       capacity: 90,  color: 0xf7b25c, phase: 1.3, path: [{x:7,y:4.5},{x:9.5,y:4.5},{x:9.5,y:7},{x:11,y:7}] },
+  { id: "toHydrocracker",  metric: "toHydrocracker",  capacity: 70,  color: 0x8ee2c4, phase: 2.2, path: [{x:7,y:4.5},{x:4.5,y:4.5},{x:4.5,y:3.5},{x:3.5,y:3.5}] },
+  { id: "toAlkylation",    metric: "toAlkylation",    capacity: 45,  color: 0xc5a1ff, phase: 2.9, path: [{x:11,y:7},{x:12,y:7},{x:12,y:3.5}] },
+  { id: "toExport",        metric: "toExport",        capacity: 160, color: 0x9ec8ff, phase: 3.6, path: [{x:7,y:4.5},{x:11,y:4.5},{x:11,y:9.5},{x:13.5,y:9.5}] },
 ];
 
+/* ------------------------- topology helpers ------------------------- */
+const processTopology = simulation.getProcessTopology?.() || {};
+function buildUnitConnectionIndex(topology) {
+  const map = new Map();
+  Object.entries(topology || {}).forEach(([unitId, entry]) => {
+    const set = new Set();
+    (entry.feeds || []).forEach((i) => i?.pipeline && set.add(i.pipeline));
+    (entry.outputs || []).forEach((i) => i?.pipeline && set.add(i.pipeline));
+    map.set(unitId, [...set]);
+  });
+  return map;
+}
+const unitConnectionIndex = buildUnitConnectionIndex(processTopology);
 
-const SVG_NS = "http://www.w3.org/2000/svg";
+/* =================================================================== */
+/* =========================  CANVAS RENDERER  ======================== */
+/* =================================================================== */
 
-class TileRenderer {
-  constructor(container, simulationInstance, unitDefs, pipelineDefs) {
+class CanvasRenderer {
+  constructor(container, simulation, unitDefs, pipelineDefs) {
     this.container = container;
-    this.simulation = simulationInstance;
+    this.simulation = simulation;
     this.unitDefs = unitDefs;
     this.pipelineDefs = pipelineDefs;
-    this.pipelineLookup = new Map(pipelineDefs.map((entry) => [entry.id, entry]));
-    this.tileWidth = 64;
-    this.tileHeight = 32;
-    this.mapCols = 16;
-    this.mapRows = 12;
-    this.viewWidth = 1180;
-    this.viewHeight = 760;
-    this.originX =
-      this.viewWidth / 2 - ((this.mapCols - this.mapRows) * this.tileWidth) / 4;
-    this.originY = 150;
+    this.pipelineLookup = new Map(pipelineDefs.map(p => [p.id, p]));
+
+    // map geometry
+    this.tileW = 64;
+    this.tileH = 32;
+    this.cols = 16;
+    this.rows = 12;
+
+    // compute world extents (isometric diamond)
+    this.worldW = (this.cols + this.rows) * this.tileW / 2;
+    this.worldH = (this.cols + this.rows) * this.tileH / 2;
+    this.originX = this.worldW / 2 - ((this.cols - this.rows) * this.tileW) / 4;
+    this.originY = this.tileH; // slight top padding
+
+    // canvas + dpi
+    this.canvas = document.createElement("canvas");
+    this.canvas.className = "map-canvas";
+    this.canvas.style.width = "100%";
+    this.canvas.style.height = "100%";
+    this.canvas.style.display = "block";
+    this.canvas.style.cursor = "grab";
+    this.canvas.setAttribute("aria-hidden", "true");
+    this.ctx = this.canvas.getContext("2d", { alpha: true });
+    this.container.appendChild(this.canvas);
+
+    // camera in CSS pixels; offsets are applied by ctx transform
+    this.camera = {
+      zoom: 1,
+      min: 0.65,
+      max: 2.8,
+      ox: 0, oy: 0,            // offsets in device pixels
+      homeZoom: 1,
+      homeOX: 0, homeOY: 0,
+      user: false
+    };
+
+    // state
     this.time = 0;
-    this.selectionFlash = 0;
     this.gridVisible = true;
     this.flowVisible = true;
-    this.highlightedPipelines = new Set();
+    this.highlighted = new Set();
     this.selectedUnitId = null;
     this.hoverUnitId = null;
     this.pointer = { x: 0, y: 0, active: false };
-    this.deviceScaleX = 1;
-    this.deviceScaleY = 1;
-    this.paletteIndex = 0;
-    this.camera = {
-      zoom: 1,
-      minZoom: 0.65,
-      maxZoom: 2.8,
-      offsetX: 0,
-      offsetY: 0,
-      homeOffsetX: 0,
-      homeOffsetY: 0,
-      homeZoom: 1,
-      userControlled: false,
-    };
-    this.panSession = null;
+    this.pan = null;
 
+    // palettes (+ retro)
     this.palettes = [
       {
-        pavement: "#c8b79c",
-        pavementShadow: "#8b785f",
-        water: "#1d3b63",
-        waterHighlight: "#2e5a87",
-        shore: "#365b74",
-        grass: "#7fb368",
-        green: "#6fa793",
-        field: "#b0823c",
-        fieldAlt: "#d3a754",
-        road: "#3c465c",
-        roadLine: "#f0ddb1",
-        walkway: "#c4af8a",
-        grid: "rgba(32, 40, 54, 0.4)",
-        outline: "#1c1d20",
-        pipeBase: "#76aee8",
-        pipeGlow: "rgba(240,252,255,0.75)",
-        labelBg: "rgba(12, 16, 22, 0.6)",
+        pavement: "#c8b79c", water: "#1d3b63", waterHi: "#2e5a87",
+        shore: "#365b74", grass: "#7fb368", green:"#6fa793",
+        field:"#b0823c", fieldAlt:"#d3a754",
+        road:"#3c465c", roadLine:"#f0ddb1",
+        walkway:"#c4af8a", outline:"#1c1d20",
+        grid:"rgba(32,40,54,0.4)", pipeBase:"#76aee8", pipeGlow:"rgba(240,252,255,0.75)",
+        labelBg:"rgba(12,16,22,0.6)"
       },
       {
-        pavement: "#b5becb",
-        pavementShadow: "#8792a2",
-        water: "#16314e",
-        waterHighlight: "#254a72",
-        shore: "#314d6b",
-        grass: "#6b9463",
-        green: "#6fa0a9",
-        field: "#9d7134",
-        fieldAlt: "#c48a3d",
-        road: "#3a4357",
-        roadLine: "#e7deb4",
-        walkway: "#bca27f",
-        grid: "rgba(20, 32, 48, 0.42)",
-        outline: "#16171c",
-        pipeBase: "#8ec8ff",
-        pipeGlow: "rgba(226,246,255,0.8)",
-        labelBg: "rgba(10, 12, 18, 0.65)",
+        pavement:"#b5becb", water:"#16314e", waterHi:"#254a72",
+        shore:"#314d6b", grass:"#6b9463", green:"#6fa0a9",
+        field:"#9d7134", fieldAlt:"#c48a3d",
+        road:"#3a4357", roadLine:"#e7deb4",
+        walkway:"#bca27f", outline:"#16171c",
+        grid:"rgba(20,32,48,0.42)", pipeBase:"#8ec8ff", pipeGlow:"rgba(226,246,255,0.8)",
+        labelBg:"rgba(10,12,18,0.65)"
       },
+      // SimRefinery-ish
+      {
+        pavement:"#b59b6b", water:"#1d4aa6", waterHi:"#2f76d4",
+        shore:"#355672", grass:"#78a35a", green:"#6ea294",
+        field:"#b28338", fieldAlt:"#d4a44b",
+        road:"#5f6265", roadLine:"#e4d29f",
+        walkway:"#b9a17a", outline:"#2b2e34",
+        grid:"rgba(18,24,34,0.45)", pipeBase:"#6ea0d8", pipeGlow:"rgba(240,252,255,0.70)",
+        labelBg:"rgba(10,14,20,0.62)"
+      }
     ];
+    this.paletteIndex = 2;
 
-    this.tiles = this._buildBaseTiles();
+    // map tiles + decor
+    this.tiles = this._buildTiles();
     this.decor = this._buildDecor();
 
-    this.svg = createSvgElement("svg", {
-      class: "tile-svg",
-      viewBox: `0 0 ${this.viewWidth} ${this.viewHeight}`,
-      role: "presentation",
-      "aria-hidden": "true",
-    });
-    this.container.appendChild(this.svg);
-    this.svg.style.touchAction = "none";               // prevent browser scrolling/gestures
-    this.svg.setAttribute("shape-rendering", "crispEdges"); // also helps retro look
-    this.svg.style.imageRendering = "pixelated";
+    // textures
+    this._makeDitherTextures();
 
-    this.worldGroup = createSvgElement("g", { class: "map-world" });
-    this.svg.appendChild(this.worldGroup);
+    // DPI + first layout
+    this.deviceScaleX = 1;
+    this.deviceScaleY = 1;
+    this.resizeToContainer(this.container);
+    this._fitCameraToView();
 
-    this.layers = {
-      base: this._createLayer("tile-layer base"),
-      grid: this._createLayer("tile-layer grid"),
-      decor: this._createLayer("tile-layer decor"),
-      pipelines: this._createLayer("tile-layer pipelines"),
-      pipelineGlow: this._createLayer("tile-layer pipeline-glow"),
-      units: this._createLayer("tile-layer units"),
-      overlay: this._createLayer("tile-layer overlay"),
-    };
-
-    this.tileNodes = this._createTiles();
-    this.gridNodes = this._createGrid();
-    this.decorNodes = this._createDecorNodes();
-    this.pipelineNodes = this._createPipelineNodes();
-    this.unitNodes = this._createUnitNodes();
-    this.pointerNode = this._createPointerNode();
-    this.tankNodes = this._createTankNodes();
-
-this._applyPalette();
-this.mapBounds = this._calculateMapBounds();
-this.resizeToContainer(this.container); // size first
-this._fitCameraToView();                // then compute the fit
-
-
+    // visual options
+    this.canvas.style.imageRendering = "pixelated";
   }
 
-  getSurface() {
-    return this.svg;
-  }
+  /* ------------ public surface (used by your UI code) ------------ */
+  getSurface() { return this.canvas; }
+  setGridVisible(v){ this.gridVisible = v; }
+  setFlowVisible(v){ this.flowVisible = v; }
+  cyclePalette(){ this.paletteIndex = (this.paletteIndex + 1) % this.palettes.length; this._makeDitherTextures(); }
+  setHighlightedPipelines(ids){ this.highlighted = new Set(ids); }
+  setSelectedUnit(id){ this.selectedUnitId = id; }
+  setHoverUnit(id){ this.hoverUnitId = id; }
+  setPointer(x,y,a){ this.pointer = { x, y, active:a }; }
 
-resizeToContainer(container) {
-  const rect = container.getBoundingClientRect();
-  const width = Math.max(720, Math.floor(rect.width));
-  const height = Math.max(480, Math.floor(rect.height));
+  resizeToContainer(container){
+    const r = container.getBoundingClientRect();
+    const w = Math.max(720, Math.floor(r.width));
+    const h = Math.max(480, Math.floor(r.height));
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
 
-  const firstTime = !this.initialSetupDone;
-  this.initialSetupDone = true;
+    this.canvas.width  = Math.floor(w * dpr);
+    this.canvas.height = Math.floor(h * dpr);
+    this.displayW = w;
+    this.displayH = h;
+    this.dpr = dpr;
+    this.deviceScaleX = dpr;
+    this.deviceScaleY = dpr;
 
-  // Update SVG size
-  this.svg.setAttribute("width", width);
-  this.svg.setAttribute("height", height);
-  this.svg.style.width = `${width}px`;
-  this.svg.style.height = `${height}px`;
-
-  // Update pixel↔viewBox scales used for pointer math
-  this.deviceScaleX = this.viewWidth / width;
-  this.deviceScaleY = this.viewHeight / height;
-  this.displayWidth = width;
-  this.displayHeight = height;
-
-  // If the user hasn't moved the camera yet, keep the map centered
-  if (!this.camera.userControlled) {
-    const { offsetX, offsetY } = this._centeredOffsets(this.camera.zoom);
-    this.camera.offsetX = Math.round(offsetX * 100) / 100;
-    this.camera.offsetY = Math.round(offsetY * 100) / 100;
-
-    // Initialize "home" so double‑click reset works predictably
-    if (firstTime) {
-      this.camera.homeZoom = this.camera.zoom;
-      this.camera.homeOffsetX = this.camera.offsetX;
-      this.camera.homeOffsetY = this.camera.offsetY;
+    // keep camera centered if user hasn't moved it
+    if (!this.camera.user) {
+      const { ox, oy, zoom } = this._centeredAt(this.camera.zoom);
+      this.camera.ox = ox; this.camera.oy = oy;
+      this.camera.homeOX = ox; this.camera.homeOY = oy; this.camera.homeZoom = zoom;
     }
   }
 
-  this._updateCameraTransform();
-}
-
-
-  setGridVisible(visible) {
-    this.gridVisible = visible;
-    this.layers.grid.classList.toggle("hidden", !visible);
+  resetView(){
+    this.camera.user = false;
+    const { ox, oy, zoom } = this._centeredAt(this.camera.homeZoom);
+    this.camera.zoom = zoom;
+    this.camera.ox = ox;
+    this.camera.oy = oy;
+    this._clampCamera();
   }
 
-  setFlowVisible(visible) {
-    this.flowVisible = visible;
-    this.layers.pipelineGlow.classList.toggle("hidden", !visible);
+  screenToIso(sx, sy){
+    // sx/sy are in canvas *pixel* coordinates (caller multiplies by dpr)
+    const wx = (sx - this.camera.ox) / this.camera.zoom;
+    const wy = (sy - this.camera.oy) / this.camera.zoom;
+    const x = (wx - this.originX) / (this.tileW / 2);
+    const y = (wy - this.originY) / (this.tileH / 2);
+    return { x: (x + y)/2, y: (y - x)/2 };
   }
 
-  cyclePalette() {
-    this.paletteIndex = (this.paletteIndex + 1) % this.palettes.length;
-    this._applyPalette();
-  }
-
-  setHighlightedPipelines(pipelines) {
-    this.highlightedPipelines = new Set(pipelines);
-    for (const [id, node] of this.pipelineNodes.entries()) {
-      node.group.classList.toggle("highlighted", this.highlightedPipelines.has(id));
-    }
-  }
-
-  setSelectedUnit(unitId) {
-    this.selectedUnitId = unitId;
-    for (const [id, node] of this.unitNodes.entries()) {
-      node.group.classList.toggle("selected", id === unitId);
-    }
-    if (unitId) {
-      this.focusOnUnit(unitId, { onlyIfVisible: true });
-    }
-  }
-
-  setHoverUnit(unitId) {
-    this.hoverUnitId = unitId;
-    for (const [id, node] of this.unitNodes.entries()) {
-      const isHover = unitId === id && this.selectedUnitId !== id;
-      node.group.classList.toggle("hover", isHover);
-    }
-  }
-
-  setPointer(x, y, active) {
-    this.pointer.x = x;
-    this.pointer.y = y;
-    this.pointer.active = active;
-  }
-
-  render(deltaSeconds, { flows, logistics }) {
-    this.time += deltaSeconds;
-    this._stabilizeCamera();
-    if (deltaSeconds > 0) {
-      this.selectionFlash += deltaSeconds;
-    }
-
-    for (const pipeline of this.pipelineDefs) {
-      const nodes = this.pipelineNodes.get(pipeline.id);
-      if (!nodes) continue;
-      const value = flows?.[pipeline.metric] ?? 0;
-      const ratio = pipeline.capacity ? clamp(value / pipeline.capacity, 0, 1.5) : 0;
-      const highlight = this.highlightedPipelines.has(pipeline.id);
-      const intensity = highlight ? 1 : clamp(ratio, 0.2, 0.9);
-      nodes.base.setAttribute("stroke-width", highlight ? 10 : 6);
-      nodes.base.setAttribute("stroke-opacity", (0.25 + intensity * 0.6).toFixed(3));
-      const glowOpacity = this.flowVisible ? (0.12 + intensity * 0.6).toFixed(3) : 0;
-      nodes.glow.setAttribute("stroke-opacity", glowOpacity);
-      const dashOffset = ((this.time * 60 + pipeline.phase * 40) % 180).toFixed(2);
-      nodes.glow.setAttribute("stroke-dashoffset", dashOffset);
-    }
-
-    const unitMetrics = new Map(this.simulation.getUnits().map((unit) => [unit.id, unit]));
-    for (const [id, node] of this.unitNodes.entries()) {
-      const data = unitMetrics.get(id);
-      const utilization = clamp(data?.utilization ?? 0, 0, 1.3);
-      const integrity = clamp(data?.integrity ?? 0, 0, 1);
-      node.loadBar.setAttribute("width", (node.barWidth * clamp(utilization, 0, 1)).toFixed(1));
-      node.healthBar.setAttribute("width", (node.barWidth * integrity).toFixed(1));
-      if (this.selectedUnitId === id) {
-        const pulse = 0.45 + Math.sin(this.selectionFlash * 3) * 0.35;
-        node.highlight.setAttribute("stroke-opacity", pulse.toFixed(2));
-      } else {
-        node.highlight.setAttribute("stroke-opacity", node.baseOpacity);
-      }
-    }
-
-    if (this.pointer.active) {
-      const points = this._diamondPoints(this.pointer.x, this.pointer.y);
-      this.pointerNode.setAttribute("points", pointsToString(points));
-      this.pointerNode.classList.add("visible");
-    } else {
-      this.pointerNode.classList.remove("visible");
-    }
-
-    if (this.decorDynamic?.flare) {
-      const flame = this.decorDynamic.flare;
-      const scale = 1 + Math.sin(this.time * 4.5) * 0.2;
-      flame.element.setAttribute(
-        "transform",
-        `translate(${flame.baseX} ${flame.baseY}) scale(1 ${scale.toFixed(3)})`
-      );
-    }
-
-    const storage = logistics?.storage || {};
-    const levels = storage.levels || {};
-    const capacity = storage.capacity || {};
-    for (const [product, node] of this.tankNodes.entries()) {
-      const level = levels[product] || 0;
-      const cap = capacity[product] || 1;
-      const ratio = cap ? clamp(level / cap, 0, 1) : 0;
-      const height = node.maxHeight * ratio;
-      node.fill.setAttribute("height", height.toFixed(1));
-      node.fill.setAttribute("y", (node.baseY + node.maxHeight - height).toFixed(1));
-    }
-
-  }
-
-  screenToIso(clientX, clientY) {
-    const adjustedX = (clientX - this.camera.offsetX) / this.camera.zoom;
-    const adjustedY = (clientY - this.camera.offsetY) / this.camera.zoom;
-    const x = (adjustedX - this.originX) / (this.tileWidth / 2);
-    const y = (adjustedY - this.originY) / (this.tileHeight / 2);
-    const isoX = (x + y) / 2;
-    const isoY = (y - x) / 2;
-    return { x: isoX, y: isoY };
-  }
-
-  getUnitAt(worldX, worldY) {
-    for (const unit of this.unitDefs) {
-      const withinX = worldX >= unit.tileX - 0.25 && worldX <= unit.tileX + unit.width - 0.1;
-      const withinY = worldY >= unit.tileY - 0.25 && worldY <= unit.tileY + unit.height - 0.1;
-      if (withinX && withinY) {
-        return unit;
-      }
+  getUnitAt(wx, wy){
+    for (const u of this.unitDefs) {
+      const withinX = wx >= u.tileX - 0.25 && wx <= u.tileX + u.width  - 0.1;
+      const withinY = wy >= u.tileY - 0.25 && wy <= u.tileY + u.height - 0.1;
+      if (withinX && withinY) return u;
     }
     return null;
   }
 
-resetView() {
-  this.pointer.active = false;
-  this.camera.userControlled = false;
-  
-  // Calculate the proper centered view
-  if (!this.mapBounds) {
-    this.mapBounds = this._calculateMapBounds();
+  beginPan(sx, sy){
+    this.canvas.style.cursor = "grabbing";
+    this.pan = { sx, sy, ox: this.camera.ox, oy: this.camera.oy };
+    this.camera.user = true;
   }
-  
-  const marginX = 160;
-  const marginY = 140;
-  const availableWidth = this.viewWidth - marginX;
-  const availableHeight = this.viewHeight - marginY;
-  
-  const scaleX = availableWidth / Math.max(1, this.mapBounds.width);
-  const scaleY = availableHeight / Math.max(1, this.mapBounds.height);
-  const targetZoom = clamp(Math.min(scaleX, scaleY), this.camera.minZoom, this.camera.maxZoom);
-  
-  // Set exact home positions
-  this.camera.homeZoom = targetZoom;
-  const centered = this._centeredOffsets(targetZoom);
-  this.camera.homeOffsetX = Math.round(centered.offsetX * 100) / 100;
-  this.camera.homeOffsetY = Math.round(centered.offsetY * 100) / 100;
-  
-  // Set current to home immediately for reset
-  this.camera.zoom = this.camera.homeZoom;
-  this.camera.offsetX = this.camera.homeOffsetX;
-  this.camera.offsetY = this.camera.homeOffsetY;
-  this._clampCamera();               // <— add this
-
-  this._updateCameraTransform();
-}
-
-  getSurfaceBounds() {
-    return this.svg.getBoundingClientRect();
-  }
-
-  nudgeCamera(deltaX, deltaY) {
-    if (!Number.isFinite(deltaX) && !Number.isFinite(deltaY)) {
-      return;
-    }
-    if (Number.isFinite(deltaX)) {
-      this.camera.offsetX += deltaX;
-    }
-    if (Number.isFinite(deltaY)) {
-      this.camera.offsetY += deltaY;
-    }
-    this.camera.userControlled = true;
+  panTo(sx, sy){
+    if (!this.pan) return;
+    this.camera.ox = this.pan.ox + (sx - this.pan.sx);
+    this.camera.oy = this.pan.oy + (sy - this.pan.sy);
     this._clampCamera();
-    this._updateCameraTransform();
+  }
+  endPan(){ this.pan = null; this.canvas.style.cursor = "grab"; }
+  isPanning(){ return !!this.pan; }
+
+  nudgeCamera(dx, dy){
+    this.camera.ox += dx;
+    this.camera.oy += dy;
+    this.camera.user = true;
+    this._clampCamera();
   }
 
-  _createLayer(className) {
-    const group = createSvgElement("g", { class: className });
-    this.worldGroup.appendChild(group);
-    return group;
+  zoomAt(sx, sy, deltaY){
+    const factor = Math.exp(-deltaY * 0.0012);
+    const next = clamp(this.camera.zoom * factor, this.camera.min, this.camera.max);
+    if (Math.abs(next - this.camera.zoom) < 0.0001) return;
+
+    // zoom around pointer
+    const wx = (sx - this.camera.ox) / this.camera.zoom;
+    const wy = (sy - this.camera.oy) / this.camera.zoom;
+    this.camera.zoom = next;
+    this.camera.ox = sx - wx * next;
+    this.camera.oy = sy - wy * next;
+    this.camera.user = true;
+    this._clampCamera();
   }
 
-  _createTiles() {
-    const nodes = [];
-    for (let y = 0; y < this.mapRows; y += 1) {
-      for (let x = 0; x < this.mapCols; x += 1) {
-        const type = this.tiles[y][x];
-        const baseType = type.split("-")[0];
-        const points = this._tileDiamondPoints(x, y);
-        const group = createSvgElement("g", {
-          class: `tile tile-${baseType}`,
-        });
-        let leftSide = null;
-        let rightSide = null;
-        if (baseType !== "water" && baseType !== "shore") {
-          leftSide = createSvgElement("polygon", {
-            class: "tile-side tile-side-left",
-            points: pointsToString(this._tileSidePoints(points, "left")),
-          });
-          rightSide = createSvgElement("polygon", {
-            class: "tile-side tile-side-right",
-            points: pointsToString(this._tileSidePoints(points, "right")),
-          });
-          group.appendChild(leftSide);
-          group.appendChild(rightSide);
+  focusOnUnit(id, { onlyIfVisible = true } = {}){
+    const unit = this.unitDefs.find(u => u.id === id);
+    if (!unit) return;
+    const c = this._tileToScreen(unit.tileX + unit.width/2, unit.tileY + unit.height/2);
+    const sx = c.x * this.camera.zoom + this.camera.ox;
+    const sy = c.y * this.camera.zoom + this.camera.oy;
+    const margin = 120 * this.dpr;
+    if (onlyIfVisible && sx>=margin && sx<=this.canvas.width-margin && sy>=margin && sy<=this.canvas.height-margin) return;
+    this._moveCameraTo(c.x, c.y);
+    this.camera.user = true;
+  }
+
+  /* ----------------------------- render ---------------------------- */
+  render(dt, { flows, logistics }){
+    this.time += dt;
+
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.setTransform(this.camera.zoom, 0, 0, this.camera.zoom, this.camera.ox, this.camera.oy);
+
+    const pal = this.palettes[this.paletteIndex];
+
+    // base tiles
+    this._drawTiles(ctx, pal);
+
+    // grid
+    if (this.gridVisible) this._drawGrid(ctx, pal);
+
+    // pipelines
+    this._drawPipelines(ctx, pal, flows);
+
+    // units + labels + gauges
+    this._drawUnits(ctx, pal);
+
+    // pointer
+    if (this.pointer.active) this._drawPointer(ctx, pal);
+
+    ctx.restore();
+  }
+
+  /* --------------------------- draw parts -------------------------- */
+  _drawTiles(ctx, pal){
+    const base = (tx, ty) => this._tileToScreen(tx, ty);
+    for (let y=0; y<this.rows; y++){
+      for (let x=0; x<this.cols; x++){
+        const t = this.tiles[y][x]; const [type, orient] = t.split("-");
+        const p = this._tileDiamond(x, y);
+        // fill (dither) + outline
+        ctx.fillStyle = this._textureFor(type, pal);
+        ctx.beginPath(); pathPolygon(ctx, p); ctx.fill();
+
+        // soft highlight/shadow to add depth
+        const hi = lighten(this._colorFor(type, pal), type==="water" ? 0.35 : 0.22);
+        const sh = darken (this._colorFor(type, pal), type==="water" ? 0.25 : 0.30);
+        // highlight cap
+        ctx.fillStyle = hexWithAlpha(hi, type==="water" ? 0.55 : 0.42);
+        pathPolygon(ctx, this._highlightPoly(p)); ctx.fill();
+        // shadow wedge
+        ctx.fillStyle = hexWithAlpha(sh, type==="water" ? 0.4 : 0.55);
+        pathPolygon(ctx, this._shadowPoly(p)); ctx.fill();
+
+        // roads/walkways after ground
+        if (type === "road"){
+          const poly = this._roadPoly(x, y, orient || "ew");
+          ctx.fillStyle = pal.road;
+          pathPolygon(ctx, poly); ctx.fill();
+
+          // dashed center line
+          const [s, e] = this._roadCenterLine(x, y, orient || "ew");
+          ctx.save(); ctx.lineWidth = 1.6; ctx.setLineDash([6,6]); ctx.lineCap = "round";
+          ctx.strokeStyle = pal.roadLine; ctx.beginPath(); ctx.moveTo(s[0], s[1]); ctx.lineTo(e[0], e[1]); ctx.stroke(); ctx.restore();
         }
-        const base = createSvgElement("polygon", {
-          class: "tile-base",
-          points: pointsToString(points),
-        });
-        const highlight = createSvgElement("polygon", {
-          class: "tile-highlight",
-          points: pointsToString(this._tileHighlightPoints(points)),
-        });
-        highlight.setAttribute("stroke", "none");
-        const shadow = createSvgElement("polygon", {
-          class: "tile-shadow",
-          points: pointsToString(this._tileShadowPoints(points)),
-        });
-        shadow.setAttribute("stroke", "none");
-        group.appendChild(base);
-        group.appendChild(shadow);
-        group.appendChild(highlight);
-        this.layers.base.appendChild(group);
-        const tile = {
-          group,
-          base,
-          highlight,
-          shadow,
-          leftSide,
-          rightSide,
-          type,
-          baseType,
-          x,
-          y,
-        };
-        const overlay = this._decorateTile(tile);
-        if (overlay) {
-          tile.overlay = overlay;
+        if (type === "walkway"){
+          const poly = this._walkwayPoly(x,y);
+          ctx.fillStyle = pal.walkway; pathPolygon(ctx, poly); ctx.fill();
         }
-        nodes.push(tile);
+        if (type === "shore"){
+          // a little foam line
+          ctx.strokeStyle = hexWithAlpha(lighten(pal.waterHi || pal.water, .25), .7);
+          ctx.lineWidth = 1; ctx.beginPath();
+          const c = base(x,y), r = base(x+1,y), b = base(x,y+1), l = base(x-1,y);
+          ctx.moveTo(mix(l.x, c.x, .78), mix(l.y, c.y, .78));
+          ctx.lineTo(mix(c.x, r.x, .62), mix(c.y, r.y, .62));
+          ctx.lineTo(mix(r.x, b.x, .72), mix(r.y, b.y, .72));
+          ctx.stroke();
+        }
       }
     }
-    return nodes;
   }
 
-  _tileHighlightPoints(points) {
-    const [top, right, bottom, left] = points;
-    const center = [
-      (top[0] + right[0] + bottom[0] + left[0]) / 4,
-      (top[1] + right[1] + bottom[1] + left[1]) / 4,
-    ];
-    const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  _drawGrid(ctx, pal){
+    ctx.strokeStyle = pal.grid; ctx.lineWidth = 1;
+    for (let y=0; y<this.rows; y++)
+      for (let x=0; x<this.cols; x++)
+        { ctx.beginPath(); pathPolygon(ctx, this._tileDiamond(x,y)); ctx.stroke(); }
+  }
+
+  _drawPipelines(ctx, pal, flows){
+    const t = this.time;
+    for (const pipe of this.pipelineDefs){
+      // base stroke
+      const baseColor = toHex(pipe.color ?? 0x6ea0d8);
+      ctx.lineWidth = 4; ctx.lineJoin = "round"; ctx.lineCap = "round";
+      ctx.strokeStyle = baseColor;
+      ctx.beginPath();
+      pipe.path.forEach((pt,i) => {
+        const p = this._tileToScreen(pt.x, pt.y);
+        if (i===0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+      });
+      ctx.globalAlpha = 0.85;
+      ctx.stroke();
+
+      // glow/dash shows flow
+      const v = flows?.[pipe.metric] ?? 0;
+      const ratio = pipe.capacity ? clamp(v / pipe.capacity, 0, 1.5) : 0;
+      const highlighted = this.highlighted.has(pipe.id);
+      const intensity = highlighted ? 1 : clamp(ratio, 0.2, 0.9);
+      if (this.flowVisible) {
+        ctx.save();
+        ctx.strokeStyle = pal.pipeGlow;
+        ctx.lineWidth = highlighted ? 10 : 7;
+        ctx.globalAlpha = 0.12 + intensity * 0.6;
+        ctx.setLineDash([18,22]);
+        ctx.lineDashOffset = -((t * 60 + (pipe.phase||0) * 40) % 180);
+        ctx.beginPath();
+        pipe.path.forEach((pt,i) => {
+          const p = this._tileToScreen(pt.x, pt.y);
+          if (i===0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+        });
+        ctx.stroke();
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  _drawUnits(ctx, pal){
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+
+    for (const u of this.unitDefs){
+      const c = this._tileToScreen(u.tileX + u.width/2, u.tileY + u.height/2);
+
+      // base shape (diamond-ish body + roof + shadow)
+      const bodyW = this.tileW * Math.max(0.55, u.width * 0.45);
+      const bodyH = this.tileH * Math.max(0.60, u.height * 0.50);
+
+      const body = diamond(c.x, c.y, bodyW, bodyH);
+      const shadow = body.map(([x,y]) => [x + this.tileW*0.08, y + this.tileH*0.14]);
+      const roof   = body.map(([x,y]) => [c.x + (x-c.x)*0.72, c.y + (y-c.y)*0.72]);
+
+      ctx.fillStyle = hexWithAlpha(darken(toHex(u.color), .55), .45);
+      pathPolygon(ctx, shadow); ctx.fill();
+
+      ctx.fillStyle = toHex(u.color);
+      ctx.strokeStyle = darken(toHex(u.color), .4);
+      ctx.lineWidth = 1.5; pathPolygon(ctx, body); ctx.fill(); ctx.stroke();
+
+      ctx.fillStyle = lighten(toHex(u.accent), .25);
+      ctx.strokeStyle = darken(toHex(u.accent), .38);
+      pathPolygon(ctx, roof); ctx.fill(); ctx.stroke();
+
+      // selection / hover ring (pulsing)
+      const isSel = this.selectedUnitId === u.id;
+      const isHover = !isSel && this.hoverUnitId === u.id;
+      if (isSel || isHover) {
+        ctx.save();
+        const pulse = isSel ? (0.45 + Math.sin(this.time*3)*0.35) : 0.35;
+        ctx.strokeStyle = hexWithAlpha(lighten(toHex(u.color), .45), pulse);
+        ctx.lineWidth = 3;
+        pathPolygon(ctx, diamond(c.x, c.y + this.tileH*0.2, this.tileW*1.2, this.tileH*0.5));
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // gauges
+      const unit = this.simulation.getUnits().find(v => v.id === u.id);
+      const utilization = clamp(unit?.utilization ?? 0, 0, 1.3);
+      const integrity   = clamp(unit?.integrity ?? 0, 0, 1);
+      const barW = 52, barH = 10, gx = c.x - barW/2, gy = c.y + this.tileH*0.5;
+      // bg
+      ctx.fillStyle = pal.labelBg; roundRect(ctx, gx, gy, barW, barH, 3); ctx.fill();
+      // load
+      ctx.fillStyle = "#6ed16f"; roundRect(ctx, gx, gy, barW*clamp(utilization,0,1), 4, 2); ctx.fill();
+      // integrity
+      ctx.fillStyle = "#66b0ff"; roundRect(ctx, gx, gy+6, barW*integrity, 4, 2); ctx.fill();
+
+      // label
+      ctx.fillStyle = "#f1f5ff";
+      ctx.fillText(u.name, c.x, c.y + this.tileH*0.85);
+    }
+  }
+
+  _drawPointer(ctx, pal){
+    const p = this._diamondAt(this.pointer.x, this.pointer.y);
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 1.6;
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath(); pathPolygon(ctx, p); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  /* -------------------------- math & helpers ----------------------- */
+  _tileToScreen(wx, wy){
+    return {
+      x: this.originX + (wx - wy) * (this.tileW/2),
+      y: this.originY + (wx + wy) * (this.tileH/2)
+    };
+  }
+
+  _tileDiamond(tx, ty){
+    const p = this._tileToScreen(tx, ty);
     return [
-      top,
-      lerp(top, right, 0.45),
-      center,
-      lerp(top, left, 0.45),
+      [p.x, p.y],
+      [p.x + this.tileW/2, p.y + this.tileH/2],
+      [p.x, p.y + this.tileH],
+      [p.x - this.tileW/2, p.y + this.tileH/2],
     ];
   }
 
-  _tileShadowPoints(points) {
-    const [top, right, bottom, left] = points;
-    const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  _diamondAt(wx, wy){
+    const p = this._tileToScreen(wx, wy);
     return [
-      right,
-      lerp(right, bottom, 0.55),
-      bottom,
-      lerp(bottom, left, 0.4),
-      lerp(right, top, 0.25),
+      [p.x, p.y],
+      [p.x + this.tileW/2, p.y + this.tileH/2],
+      [p.x, p.y + this.tileH],
+      [p.x - this.tileW/2, p.y + this.tileH/2],
     ];
   }
 
-  _tileSidePoints(points, side) {
+  _highlightPoly(points){
+    const [top, right, bottom, left] = points;
+    const center = [(top[0]+right[0]+bottom[0]+left[0])/4,(top[1]+right[1]+bottom[1]+left[1])/4];
+    const L = (a,b,t)=>[mix(a[0],b[0],t),mix(a[1],b[1],t)];
+    return [top, L(top,right,.45), center, L(top,left,.45)];
+  }
+  _shadowPoly(points){
     const [, right, bottom, left] = points;
-    const drop = this.tileHeight * 0.6;
-    if (side === "left") {
-      return [
-        left,
-        bottom,
-        [bottom[0], bottom[1] + drop],
-        [left[0], left[1] + drop],
-      ];
-    }
-    return [
-      right,
-      bottom,
-      [bottom[0], bottom[1] + drop],
-      [right[0], right[1] + drop],
-    ];
-  }
-  _createGrid() {
-    const nodes = [];
-    for (let y = 0; y < this.mapRows; y += 1) {
-      for (let x = 0; x < this.mapCols; x += 1) {
-        const polygon = createSvgElement("polygon", {
-          class: "grid-line",
-          points: pointsToString(this._tileDiamondPoints(x, y)),
-        });
-        this.layers.grid.appendChild(polygon);
-        nodes.push(polygon);
-      }
-    }
-    return nodes;
+    const L = (a,b,t)=>[mix(a[0],b[0],t),mix(a[1],b[1],t)];
+    return [right, L(right,bottom,.55), bottom, L(bottom,left,.4), L(right,points[0],.25)];
   }
 
-  _decorateTile(tile) {
-    const [baseType, orientation] = tile.type.split("-");
-    const corners = this._tileDiamondPoints(tile.x, tile.y);
-    const [topCorner, rightCorner, bottomCorner, leftCorner] = corners;
-    const center = [
-      (topCorner[0] + rightCorner[0] + bottomCorner[0] + leftCorner[0]) / 4,
-      (topCorner[1] + rightCorner[1] + bottomCorner[1] + leftCorner[1]) / 4,
-    ];
-    const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-    if (baseType === "road") {
-      const dir = orientation || "ew";
-      const buildPoints = (direction) => {
-        if (direction === "ns") {
-          return [
-            lerp(topCorner, rightCorner, 0.4),
-            lerp(topCorner, leftCorner, 0.4),
-            lerp(bottomCorner, leftCorner, 0.4),
-            lerp(bottomCorner, rightCorner, 0.4),
-          ];
-        }
-        return [
-          lerp(leftCorner, topCorner, 0.4),
-          lerp(rightCorner, topCorner, 0.4),
-          lerp(rightCorner, bottomCorner, 0.4),
-          lerp(leftCorner, bottomCorner, 0.4),
-        ];
-      };
-      const createLine = (direction) => {
-        if (direction === "ns") {
-          const start = lerp(topCorner, bottomCorner, 0.12);
-          const end = lerp(topCorner, bottomCorner, 0.88);
-          return this._createRoadLine(start, end);
-        }
-        if (direction === "ew") {
-          const start = lerp(leftCorner, rightCorner, 0.12);
-          const end = lerp(leftCorner, rightCorner, 0.88);
-          return this._createRoadLine(start, end);
-        }
-        return null;
-      };
-      if (dir === "cross") {
-        const group = createSvgElement("g", { class: "road-surface cross" });
-        const horizontal = createSvgElement("polygon", {
-          class: "road-part ew",
-          points: pointsToString(buildPoints("ew")),
-        });
-        const vertical = createSvgElement("polygon", {
-          class: "road-part ns",
-          points: pointsToString(buildPoints("ns")),
-        });
-        group.appendChild(horizontal);
-        group.appendChild(vertical);
-        this.layers.decor.appendChild(group);
-        const lines = [createLine("ew"), createLine("ns")].filter(Boolean);
-        return { node: group, type: "road", orientation: dir, parts: [horizontal, vertical], lines };
-      }
-      const polygon = createSvgElement("polygon", {
-        class: `road-surface ${dir}`,
-        points: pointsToString(buildPoints(dir)),
-      });
-      this.layers.decor.appendChild(polygon);
-      const line = createLine(dir);
-      return { node: polygon, type: "road", orientation: dir, line };
-    }
-    if (baseType === "walkway") {
-      const points = [
-        lerp(corners[0], corners[1], 0.6),
-        lerp(corners[0], corners[3], 0.6),
-        lerp(corners[2], corners[3], 0.6),
-        lerp(corners[2], corners[1], 0.6),
-      ];
-      const outline = [...points, points[0]];
-      const group = createSvgElement("g", { class: "walkway-detail" });
-      const surface = createSvgElement("polygon", {
-        class: "walkway-fill",
-        points: pointsToString(points),
-      });
-      const border = createSvgElement("polyline", {
-        class: "walkway-border",
-        points: pointsToString(outline),
-      });
-      group.appendChild(surface);
-      const stripeOffsets = [0.33, 0.66];
-      const stripes = stripeOffsets.map((offset) => {
-        const start = lerp(points[1], points[2], offset);
-        const end = lerp(points[0], points[3], offset);
-        const stripe = createSvgElement("line", {
-          class: "walkway-stripe",
-          x1: start[0].toFixed(1),
-          y1: start[1].toFixed(1),
-          x2: end[0].toFixed(1),
-          y2: end[1].toFixed(1),
-        });
-        group.appendChild(stripe);
-        return stripe;
-      });
-      const posts = points.map((corner) => {
-        const post = createSvgElement("circle", {
-          class: "walkway-post",
-          cx: corner[0].toFixed(1),
-          cy: corner[1].toFixed(1),
-          r: 2.2,
-        });
-        group.appendChild(post);
-        return post;
-      });
-      group.appendChild(border);
-      this.layers.decor.appendChild(group);
-      return { node: surface, group, surface, border, stripes, posts, type: "walkway" };
-    }
-    if (baseType === "water") {
-      const group = createSvgElement("g", { class: "water-detail" });
-      const crest = createSvgElement("polyline", {
-        class: "water-ripple",
-        points: pointsToString([
-          lerp(leftCorner, topCorner, 0.55),
-          lerp(topCorner, rightCorner, 0.5),
-          lerp(rightCorner, bottomCorner, 0.45),
-        ]),
-      });
-      const mid = createSvgElement("polyline", {
-        class: "water-ripple",
-        points: pointsToString([
-          lerp(leftCorner, topCorner, 0.35),
-          lerp(topCorner, rightCorner, 0.32),
-          lerp(rightCorner, bottomCorner, 0.32),
-        ]),
-      });
-      const trough = createSvgElement("polyline", {
-        class: "water-ripple",
-        points: pointsToString([
-          lerp(leftCorner, bottomCorner, 0.65),
-          lerp(bottomCorner, rightCorner, 0.55),
-          lerp(rightCorner, topCorner, 0.6),
-        ]),
-      });
-      group.appendChild(crest);
-      group.appendChild(mid);
-      group.appendChild(trough);
-      this.layers.decor.appendChild(group);
-      return { type: "water", ripples: [crest, mid, trough] };
-    }
-    if (baseType === "field" || baseType === "fieldAlt") {
-      const group = createSvgElement("g", { class: "field-detail" });
-      const stripes = [];
-      for (let i = 1; i <= 3; i += 1) {
-        const stripe = createSvgElement("polygon", {
-          class: "field-stripe",
-          points: pointsToString([
-            lerp(leftCorner, topCorner, 0.15 * i),
-            lerp(rightCorner, topCorner, 0.18 * i + 0.15),
-            lerp(rightCorner, bottomCorner, 0.18 * i + 0.22),
-            lerp(leftCorner, bottomCorner, 0.15 * i + 0.2),
-          ]),
-        });
-        stripes.push(stripe);
-        group.appendChild(stripe);
-      }
-      this.layers.decor.appendChild(group);
-      return { type: "field", stripes };
-    }
-    if (baseType === "shore") {
-      const group = createSvgElement("g", { class: "shore-detail" });
-      const foam = createSvgElement("polyline", {
-        class: "shore-foam",
-        points: pointsToString([
-          lerp(leftCorner, topCorner, 0.22),
-          lerp(topCorner, rightCorner, 0.38),
-          lerp(rightCorner, bottomCorner, 0.28),
-          lerp(center, bottomCorner, 0.35),
-        ]),
-      });
-      group.appendChild(foam);
-      this.layers.decor.appendChild(group);
-      return { type: "shoreDetail", foam };
-    }
-    if (baseType === "pavement") {
-      const group = createSvgElement("g", { class: "pavement-detail" });
-      const highlight = createSvgElement("polygon", {
-        class: "pavement-bevel highlight",
-        points: pointsToString([
-          lerp(topCorner, leftCorner, 0.08),
-          lerp(topCorner, rightCorner, 0.08),
-          lerp(center, rightCorner, 0.24),
-          lerp(center, leftCorner, 0.24),
-        ]),
-      });
-      const shadow = createSvgElement("polygon", {
-        class: "pavement-bevel shadow",
-        points: pointsToString([
-          lerp(center, rightCorner, 0.28),
-          lerp(bottomCorner, rightCorner, 0.12),
-          lerp(bottomCorner, leftCorner, 0.12),
-          lerp(center, leftCorner, 0.28),
-        ]),
-      });
-      const seam = createSvgElement("polyline", {
-        class: "pavement-seam",
-        points: pointsToString([
-          lerp(leftCorner, bottomCorner, 0.32),
-          lerp(center, bottomCorner, 0.2),
-          lerp(rightCorner, topCorner, 0.62),
-        ]),
-      });
-      const crack = createSvgElement("polyline", {
-        class: "pavement-crack",
-        points: pointsToString([
-          lerp(center, rightCorner, 0.18),
-          lerp(center, bottomCorner, 0.28),
-        ]),
-      });
-      group.appendChild(shadow);
-      group.appendChild(highlight);
-      group.appendChild(seam);
-      group.appendChild(crack);
-      this.layers.decor.appendChild(group);
-      return { type: "pavementDetail", highlight, shadow, seam, crack };
-    }
-    if (baseType === "grass" || baseType === "green") {
-      const group = createSvgElement("g", { class: "grass-detail" });
-      const shadow = createSvgElement("polygon", {
-        class: "grass-shadow",
-        points: pointsToString([
-          lerp(center, leftCorner, 0.32),
-          lerp(center, rightCorner, 0.32),
-          lerp(center, bottomCorner, 0.42),
-          lerp(center, bottomCorner, 0.58),
-        ]),
-      });
-      group.appendChild(shadow);
-      const tuftOffsets = [
-        center,
-        lerp(center, leftCorner, 0.16),
-        lerp(center, rightCorner, 0.2),
-      ];
-      const tufts = tuftOffsets.map((base) => {
-        const tuft = createSvgElement("polygon", {
-          class: "grass-tuft",
-          points: pointsToString([
-            lerp(base, topCorner, 0.3),
-            lerp(base, rightCorner, 0.22),
-            lerp(base, bottomCorner, 0.3),
-            lerp(base, leftCorner, 0.22),
-          ]),
-        });
-        group.appendChild(tuft);
-        return tuft;
-      });
-      this.layers.decor.appendChild(group);
-      return { type: "grassDetail", shadow, tufts };
-    }
-    return null;
+  _roadPoly(tx, ty, dir){
+    const p = this._tileDiamond(tx,ty);
+    const L=(a,b,t)=>[mix(a[0],b[0],t),mix(a[1],b[1],t)];
+    if (dir==="ns") return [ L(p[0],p[1],.4), L(p[0],p[3],.4), L(p[2],p[3],.4), L(p[2],p[1],.4) ];
+    if (dir==="ew") return [ L(p[3],p[0],.4), L(p[1],p[0],.4), L(p[1],p[2],.4), L(p[3],p[2],.4) ];
+    // cross = combine
+    const a = [ L(p[3],p[0],.4), L(p[1],p[0],.4), L(p[1],p[2],.4), L(p[3],p[2],.4) ];
+    const b = [ L(p[0],p[1],.4), L(p[0],p[3],.4), L(p[2],p[3],.4), L(p[2],p[1],.4) ];
+    return a.concat(b);
+  }
+  _roadCenterLine(tx, ty, dir){
+    const p = this._tileDiamond(tx,ty);
+    const L=(a,b,t)=>[mix(a[0],b[0],t),mix(a[1],b[1],t)];
+    if (dir==="ns") return [ L(p[0],p[2],.12), L(p[0],p[2],.88) ];
+    return [ L(p[3],p[1],.12), L(p[3],p[1],.88) ];
+  }
+  _walkwayPoly(tx,ty){
+    const c = this._tileDiamond(tx,ty);
+    const L=(a,b,t)=>[mix(a[0],b[0],t),mix(a[1],b[1],t)];
+    return [ L(c[0],c[1],.6), L(c[0],c[3],.6), L(c[2],c[3],.6), L(c[2],c[1],.6) ];
   }
 
-  _createRoadLine(start, end) {
-    const line = createSvgElement("line", {
-      class: "road-centerline",
-      x1: start[0].toFixed(1),
-      y1: start[1].toFixed(1),
-      x2: end[0].toFixed(1),
-      y2: end[1].toFixed(1),
-    });
-    this.layers.decor.appendChild(line);
-    return line;
+  _centeredAt(zoom){
+    const bounds = this._mapBounds();
+    const cx = (bounds.minX+bounds.maxX)/2;
+    const cy = (bounds.minY+bounds.maxY)/2;
+    const ox = this.canvas.width/2 - cx * zoom;
+    const oy = this.canvas.height/2 - cy * zoom;
+    return { ox, oy, zoom };
   }
 
-  _createDecorNodes() {
-    const nodes = [];
-    this.decorDynamic = {};
-    for (const item of this.decor) {
-      if (item.type === "parking") {
-        const { x, y } = this._tileToScreen(item.x, item.y);
-        const width = this.tileWidth * item.width * 0.5;
-        const height = this.tileHeight * item.height;
-        const polygon = createSvgElement("polygon", {
-          class: "decor parking",
-          points: pointsToString([
-            [x, y],
-            [x + width, y + height * 0.5],
-            [x, y + height],
-            [x - width, y + height * 0.5],
-          ]),
-        });
-        this.layers.decor.appendChild(polygon);
-        nodes.push(polygon);
-      } else if (item.type === "booth") {
-        const { x, y } = this._tileToScreen(item.x, item.y);
-        const booth = createSvgElement("polygon", {
-          class: "decor booth",
-          points: pointsToString([
-            [x, y + this.tileHeight * 0.2],
-            [x + 14, y + this.tileHeight * 0.45],
-            [x, y + this.tileHeight * 0.7],
-            [x - 14, y + this.tileHeight * 0.45],
-          ]),
-        });
-        this.layers.decor.appendChild(booth);
-        nodes.push(booth);
-      } else if (item.type === "flare") {
-        const { x, y } = this._tileToScreen(item.x, item.y);
-        const base = createSvgElement("circle", {
-          class: "decor flare-base",
-          cx: x,
-          cy: y + 6,
-          r: 4,
-        });
-        const flame = createSvgElement("ellipse", {
-          class: "decor flare",
-          cx: 0,
-          cy: 0,
-          rx: 6,
-          ry: 20,
-        });
-        flame.setAttribute("transform", `translate(${x} ${y - 14})`);
-        this.layers.decor.appendChild(base);
-        this.layers.decor.appendChild(flame);
-        nodes.push(base, flame);
-        this.decorDynamic.flare = { element: flame, baseX: x, baseY: y - 14 };
-      } else if (item.type === "dock") {
-        const { x, y } = this._tileToScreen(item.x, item.y);
-        const polygon = createSvgElement("polygon", {
-          class: "decor dock",
-          points: pointsToString([
-            [x, y],
-            [x + 22, y + 14],
-            [x - 6, y + 30],
-            [x - 24, y + 14],
-          ]),
-        });
-        this.layers.decor.appendChild(polygon);
-        nodes.push(polygon);
-      } else if (item.type === "barn") {
-        const { x, y } = this._tileToScreen(item.x, item.y);
-        const barn = createSvgElement("polygon", {
-          class: "decor barn",
-          points: pointsToString([
-            [x, y + this.tileHeight * 0.3],
-            [x + 20, y + this.tileHeight * 0.55],
-            [x, y + this.tileHeight * 0.82],
-            [x - 20, y + this.tileHeight * 0.55],
-          ]),
-        });
-        this.layers.decor.appendChild(barn);
-        nodes.push(barn);
-      } else if (item.type === "recording") {
-        const { x, y } = this._tileToScreen(item.x, item.y);
-        const note = createSvgElement("rect", {
-          class: "decor recording",
-          x: x - 22,
-          y: y - 6,
-          width: 44,
-          height: 16,
-          rx: 2,
-        });
-        this.layers.decor.appendChild(note);
-        nodes.push(note);
-      }
-    }
-    return nodes;
-  }
-
-  _createPipelineNodes() {
-    const nodes = new Map();
-    for (const pipeline of this.pipelineDefs) {
-      const pathData = this._pipelinePath(pipeline.path);
-      const base = createSvgElement("path", {
-        class: "pipeline-base",
-        d: pathData,
-        stroke: toHex(pipeline.color),
-      });
-      const glow = createSvgElement("path", {
-        class: "pipeline-glow",
-        d: pathData,
-        stroke: this.palettes[this.paletteIndex].pipeGlow,
-        "stroke-dasharray": "18 22",
-      });
-      this.layers.pipelines.appendChild(base);
-      this.layers.pipelineGlow.appendChild(glow);
-      nodes.set(pipeline.id, { group: base, base, glow });
-    }
-    return nodes;
-  }
-
-  _createUnitNodes() {
-    const nodes = new Map();
-    for (const unit of this.unitDefs) {
-      const center = this._tileToScreen(unit.tileX + unit.width / 2, unit.tileY + unit.height / 2);
-      const group = createSvgElement("g", {
-        class: "unit",
-        "data-unit": unit.id,
-        transform: `translate(${center.x} ${center.y})`,
-      });
-
-      const structure = this._buildUnitStructure(unit);
-      const highlight = createSvgElement("polygon", {
-        class: "unit-highlight",
-        points: pointsToString(this._footprintPoints(unit, true)),
-      });
-      highlight.setAttribute("fill", "none");
-
-      const gauges = createSvgElement("g", {
-        class: "unit-gauges",
-        transform: `translate(-28 ${this.tileHeight * 0.5})`,
-      });
-      const loadBar = createSvgElement("rect", {
-        class: "gauge-load",
-        x: 0,
-        y: 0,
-        width: 0,
-        height: 4,
-        rx: 2,
-      });
-      const healthBar = createSvgElement("rect", {
-        class: "gauge-health",
-        x: 0,
-        y: 6,
-        width: 0,
-        height: 4,
-        rx: 2,
-      });
-      const gaugeBg = createSvgElement("rect", {
-        class: "gauge-bg",
-        x: 0,
-        y: 0,
-        width: 52,
-        height: 10,
-        rx: 3,
-      });
-      gauges.appendChild(gaugeBg);
-      gauges.appendChild(loadBar);
-      gauges.appendChild(healthBar);
-
-      const label = createSvgElement("text", {
-        class: "unit-label",
-        "text-anchor": "middle",
-        transform: `translate(0 ${this.tileHeight * 0.85})`,
-      });
-      label.textContent = unit.name;
-
-      group.appendChild(structure.group);
-      group.appendChild(highlight);
-      group.appendChild(gauges);
-      group.appendChild(label);
-      this.layers.units.appendChild(group);
-
-      nodes.set(unit.id, {
-        group,
-        highlight,
-        body: structure.body,
-        roof: structure.roof,
-        shadow: structure.shadow,
-        loadBar,
-        healthBar,
-        barWidth: 52,
-        baseOpacity: 0.35,
-      });
-    }
-    return nodes;
-  }
-
-  _buildUnitStructure(unit) {
-    const group = createSvgElement("g", { class: "unit-structure" });
-    const bodyPoints = this._unitBodyPoints(unit);
-    const shadowPoints = translatePoints(bodyPoints, this.tileWidth * 0.08, this.tileHeight * 0.14);
-    const roofPoints = scalePoints(bodyPoints, 0.72, 0.72);
-
-    const shadow = createSvgElement("polygon", {
-      class: "unit-shadow",
-      points: pointsToString(shadowPoints),
-    });
-    const body = createSvgElement("polygon", {
-      class: "unit-body",
-      points: pointsToString(bodyPoints),
-    });
-    const roof = createSvgElement("polygon", {
-      class: "unit-roof",
-      points: pointsToString(roofPoints),
-    });
-
-    group.appendChild(shadow);
-    group.appendChild(body);
-    group.appendChild(roof);
-
-    const details = this._unitDetailNodes(unit);
-    details.forEach((detail) => group.appendChild(detail));
-
-    return { group, body, roof, shadow, details };
-  }
-
-  _unitDetailNodes(unit) {
-    const nodes = [];
-    const baseColor = toHex(unit.color);
-    const accentColor = toHex(unit.accent);
-    const accentAlt = toHex(unit.accentAlt);
-    const makeDetail = (tag, attrs = {}) => {
-      const element = createSvgElement(tag, attrs);
-      element.classList.add("unit-detail");
-      element.setAttribute("pointer-events", "none");
-      return element;
-    };
-
-    const add = (element) => {
-      if (element) {
-        nodes.push(element);
-      }
-    };
-
-    switch (unit.style) {
-      case "towers": {
-        const spacing = this.tileWidth * 0.32;
-        const columnWidth = this.tileWidth * 0.28;
-        const columnHeight = this.tileHeight * 0.9;
-        const baseY = -this.tileHeight * 0.02;
-        [-spacing, 0, spacing].forEach((offset, index) => {
-          const column = makeDetail("polygon", {
-            points: pointsToString(diamondPoints(offset, baseY, columnWidth, columnHeight)),
-          });
-          column.setAttribute("fill", lightenColor(accentColor, index === 0 || index === 2 ? 0.08 : 0.16));
-          column.setAttribute("stroke", darkenColor(accentColor, 0.35));
-          column.setAttribute("stroke-width", "1.4");
-          add(column);
-
-          const top = makeDetail("polygon", {
-            points: pointsToString(
-              diamondPoints(offset, baseY - columnHeight * 0.48, columnWidth * 0.64, this.tileHeight * 0.3)
-            ),
-          });
-          top.setAttribute("fill", lightenColor(accentAlt, 0.35));
-          top.setAttribute("stroke", darkenColor(accentAlt, 0.38));
-          top.setAttribute("stroke-width", "1");
-          add(top);
-        });
-        const walkway = makeDetail("polygon", {
-          points: pointsToString(
-            diamondPoints(0, baseY + columnHeight * 0.36, this.tileWidth * 0.92, this.tileHeight * 0.2)
-          ),
-        });
-        walkway.setAttribute("fill", applyAlpha(lightenColor(accentAlt, 0.1), 0.9));
-        walkway.setAttribute("stroke", darkenColor(accentAlt, 0.45));
-        walkway.setAttribute("stroke-width", "1");
-        add(walkway);
-        break;
-      }
-      case "reactor": {
-        const centerY = -this.tileHeight * 0.04;
-        const base = makeDetail("ellipse", {
-          cx: 0,
-          cy: centerY,
-          rx: this.tileWidth * 0.38,
-          ry: this.tileHeight * 0.32,
-        });
-        base.setAttribute("fill", lightenColor(accentColor, 0.12));
-        base.setAttribute("stroke", darkenColor(accentColor, 0.4));
-        base.setAttribute("stroke-width", "2");
-        add(base);
-
-        const crossH = makeDetail("polygon", {
-          points: pointsToString(diamondPoints(0, centerY, this.tileWidth * 0.96, this.tileHeight * 0.18)),
-        });
-        crossH.setAttribute("fill", applyAlpha(mixColor(accentAlt, baseColor, 0.35), 0.8));
-        crossH.setAttribute("stroke", darkenColor(baseColor, 0.45));
-        crossH.setAttribute("stroke-width", "1.2");
-        add(crossH);
-
-        const crossV = makeDetail("polygon", {
-          points: pointsToString(diamondPoints(0, centerY, this.tileWidth * 0.2, this.tileHeight * 1.05)),
-        });
-        crossV.setAttribute("fill", applyAlpha(mixColor(accentColor, baseColor, 0.3), 0.75));
-        crossV.setAttribute("stroke", darkenColor(baseColor, 0.45));
-        crossV.setAttribute("stroke-width", "1.1");
-        add(crossV);
-
-        const core = makeDetail("ellipse", {
-          cx: 0,
-          cy: centerY,
-          rx: this.tileWidth * 0.22,
-          ry: this.tileHeight * 0.18,
-        });
-        core.setAttribute("fill", lightenColor(accentAlt, 0.38));
-        core.setAttribute("stroke", darkenColor(accentAlt, 0.36));
-        core.setAttribute("stroke-width", "1.1");
-        add(core);
-
-        const ring = makeDetail("ellipse", {
-          cx: 0,
-          cy: centerY,
-          rx: this.tileWidth * 0.48,
-          ry: this.tileHeight * 0.36,
-          fill: "none",
-        });
-        ring.setAttribute("stroke", applyAlpha(lightenColor(accentAlt, 0.7), 0.6));
-        ring.setAttribute("stroke-width", "1.8");
-        ring.setAttribute("stroke-dasharray", "10 8");
-        add(ring);
-        break;
-      }
-      case "support": {
-        const pad = makeDetail("polygon", {
-          points: pointsToString(diamondPoints(0, this.tileHeight * 0.3, this.tileWidth * 0.9, this.tileHeight * 0.22)),
-        });
-        pad.setAttribute("fill", applyAlpha(lightenColor(baseColor, 0.1), 0.85));
-        pad.setAttribute("stroke", darkenColor(baseColor, 0.45));
-        pad.setAttribute("stroke-width", "1");
-        add(pad);
-
-        const offsets = [
-          [-this.tileWidth * 0.26, -this.tileHeight * 0.1],
-          [this.tileWidth * 0.26, -this.tileHeight * 0.1],
-          [-this.tileWidth * 0.26, this.tileHeight * 0.2],
-          [this.tileWidth * 0.26, this.tileHeight * 0.2],
-        ];
-        const tankWidth = this.tileWidth * 0.26;
-        const tankHeight = this.tileHeight * 0.28;
-        offsets.forEach(([x, y]) => {
-          const tank = makeDetail("polygon", {
-            points: pointsToString(diamondPoints(x, y, tankWidth, tankHeight)),
-          });
-          tank.setAttribute("fill", lightenColor(accentColor, 0.14));
-          tank.setAttribute("stroke", darkenColor(accentColor, 0.38));
-          tank.setAttribute("stroke-width", "1.1");
-          add(tank);
-
-          const dome = makeDetail("polygon", {
-            points: pointsToString(
-              diamondPoints(x, y - tankHeight * 0.38, tankWidth * 0.62, this.tileHeight * 0.18)
-            ),
-          });
-          dome.setAttribute("fill", lightenColor(accentAlt, 0.4));
-          dome.setAttribute("stroke", darkenColor(accentAlt, 0.36));
-          dome.setAttribute("stroke-width", "1");
-          add(dome);
-        });
-
-        const pipe = makeDetail("polygon", {
-          points: pointsToString(diamondPoints(0, -this.tileHeight * 0.38, this.tileWidth * 0.7, this.tileHeight * 0.16)),
-        });
-        pipe.setAttribute("fill", applyAlpha(mixColor(accentColor, baseColor, 0.4), 0.75));
-        pipe.setAttribute("stroke", darkenColor(baseColor, 0.5));
-        pipe.setAttribute("stroke-width", "1.1");
-        add(pipe);
-        break;
-      }
-      case "rect":
-      default: {
-        const deck = makeDetail("polygon", {
-          points: pointsToString(diamondPoints(0, this.tileHeight * 0.18, this.tileWidth * 0.96, this.tileHeight * 0.2)),
-        });
-        deck.setAttribute("fill", applyAlpha(lightenColor(baseColor, 0.08), 0.85));
-        deck.setAttribute("stroke", darkenColor(baseColor, 0.45));
-        deck.setAttribute("stroke-width", "1");
-        add(deck);
-
-        const spacing = this.tileWidth * 0.34;
-        const unitWidth = this.tileWidth * 0.26;
-        const unitHeight = this.tileHeight * 0.3;
-        const unitY = -this.tileHeight * 0.08;
-        [-spacing, 0, spacing].forEach((offset) => {
-          const pod = makeDetail("polygon", {
-            points: pointsToString(diamondPoints(offset, unitY, unitWidth, unitHeight)),
-          });
-          pod.setAttribute("fill", lightenColor(accentColor, 0.18));
-          pod.setAttribute("stroke", darkenColor(accentColor, 0.35));
-          pod.setAttribute("stroke-width", "1.1");
-          add(pod);
-
-          const vent = makeDetail("polygon", {
-            points: pointsToString(
-              diamondPoints(offset, unitY - unitHeight * 0.4, unitWidth * 0.58, this.tileHeight * 0.18)
-            ),
-          });
-          vent.setAttribute("fill", lightenColor(accentAlt, 0.45));
-          vent.setAttribute("stroke", darkenColor(accentAlt, 0.38));
-          vent.setAttribute("stroke-width", "0.9");
-          add(vent);
-        });
-
-        const stair = makeDetail("polygon", {
-          points: pointsToString(diamondPoints(-this.tileWidth * 0.52, this.tileHeight * 0.34, this.tileWidth * 0.28, this.tileHeight * 0.26)),
-        });
-        stair.setAttribute("fill", applyAlpha(darkenColor(baseColor, 0.1), 0.85));
-        stair.setAttribute("stroke", darkenColor(baseColor, 0.5));
-        stair.setAttribute("stroke-width", "1");
-        add(stair);
-
-        break;
-      }
-    }
-
-    return nodes;
-  }
-
-  _createPointerNode() {
-    const pointer = createSvgElement("polygon", { class: "pointer" });
-    this.layers.overlay.appendChild(pointer);
-    return pointer;
-  }
-
-  _createTankNodes() {
-    const nodes = new Map();
-    const tanks = [
-      { product: "gasoline", x: 13.6, y: 5.6 },
-      { product: "diesel", x: 13.2, y: 6.6 },
-      { product: "jet", x: 14.0, y: 6.2 },
-    ];
-    tanks.forEach((tank) => {
-      const { x, y } = this._tileToScreen(tank.x, tank.y);
-      const base = createSvgElement("polygon", {
-        class: "tank-base",
-        points: pointsToString([
-          [x, y],
-          [x + 18, y + 12],
-          [x, y + 24],
-          [x - 18, y + 12],
-        ]),
-      });
-      const fill = createSvgElement("rect", {
-        class: "tank-fill",
-        x: x - 12,
-        y: y + 8,
-        width: 24,
-        height: 0,
-      });
-      this.layers.decor.appendChild(base);
-      this.layers.decor.appendChild(fill);
-      nodes.set(tank.product, {
-        base,
-        fill,
-        maxHeight: 14,
-        baseY: y + 8,
-      });
-    });
-    return nodes;
-  }
-
-  _applyPalette() {
-    const palette = this.palettes[this.paletteIndex] || this.palettes[0];
-    this.tileNodes.forEach((tile) => {
-      const color = palette[tile.baseType] || palette.pavement;
-      tile.base.setAttribute("fill", color);
-      tile.base.setAttribute("stroke", palette.outline);
-      const highlightColor =
-        palette[`${tile.baseType}Highlight`] || lightenColor(color, tile.baseType === "water" ? 0.35 : 0.25);
-      const shadowColor =
-        palette[`${tile.baseType}Shadow`] || darkenColor(color, tile.baseType === "water" ? 0.25 : 0.35);
-      const highlightAlpha = tile.baseType === "water" ? 0.55 : 0.4;
-      const shadowAlpha = tile.baseType === "water" ? 0.4 : 0.55;
-      tile.highlight.setAttribute("fill", applyAlpha(highlightColor, highlightAlpha));
-      tile.shadow.setAttribute("fill", applyAlpha(shadowColor, shadowAlpha));
-      if (tile.leftSide) {
-        const leftTone = applyAlpha(lightenColor(color, 0.18), 0.92);
-        tile.leftSide.setAttribute("fill", leftTone);
-        tile.leftSide.setAttribute("stroke", applyAlpha(darkenColor(color, 0.5), 0.8));
-      }
-      if (tile.rightSide) {
-        const rightTone = applyAlpha(darkenColor(color, 0.48), 0.94);
-        tile.rightSide.setAttribute("fill", rightTone);
-        tile.rightSide.setAttribute("stroke", applyAlpha(darkenColor(color, 0.65), 0.85));
-      }
-
-      if (!tile.overlay) {
-        return;
-      }
-      if (tile.overlay.type === "walkway") {
-        const overlayColor = palette.walkway || lightenColor(color, 0.15);
-        if (tile.overlay.surface) {
-          tile.overlay.surface.setAttribute("fill", overlayColor);
-        }
-        if (tile.overlay.border) {
-          const borderColor = applyAlpha(darkenColor(overlayColor, 0.35), 0.75);
-          tile.overlay.border.setAttribute("stroke", borderColor);
-        }
-        if (tile.overlay.stripes) {
-          const stripeColor = applyAlpha(darkenColor(overlayColor, 0.45), 0.8);
-          tile.overlay.stripes.forEach((stripe) => stripe.setAttribute("stroke", stripeColor));
-        }
-        if (tile.overlay.posts) {
-          const postFill = applyAlpha(lightenColor(overlayColor, 0.35), 0.9);
-          const postStroke = applyAlpha(darkenColor(overlayColor, 0.5), 0.85);
-          tile.overlay.posts.forEach((post) => {
-            post.setAttribute("fill", postFill);
-            post.setAttribute("stroke", postStroke);
-          });
-        }
-      } else if (tile.overlay.type === "road") {
-        const surfaceColor = palette.road || darkenColor(color, 0.3);
-        if (tile.overlay.parts && tile.overlay.parts.length) {
-          tile.overlay.parts.forEach((part) => part.setAttribute("fill", surfaceColor));
-        } else if (tile.overlay.node) {
-          tile.overlay.node.setAttribute("fill", surfaceColor);
-        }
-        const lineColor = palette.roadLine || lightenColor(surfaceColor, 0.55);
-        if (tile.overlay.lines && tile.overlay.lines.length) {
-          tile.overlay.lines.forEach((line) => line.setAttribute("stroke", lineColor));
-        } else if (tile.overlay.line) {
-          tile.overlay.line.setAttribute("stroke", lineColor);
-        }
-      } else if (tile.overlay.type === "water") {
-        const rippleColor = palette.waterHighlight || lightenColor(color, 0.45);
-        const rippleAlphas = [0.68, 0.52, 0.32];
-        tile.overlay.ripples.forEach((ripple, index) => {
-          const alpha = rippleAlphas[index] ?? 0.4;
-          ripple.setAttribute("stroke", applyAlpha(rippleColor, alpha));
-        });
-      } else if (tile.overlay.type === "field") {
-        const bright = lightenColor(color, 0.28);
-        const dark = darkenColor(color, 0.15);
-        tile.overlay.stripes.forEach((stripe, index) => {
-          const mix = index % 2 === 0 ? bright : dark;
-          stripe.setAttribute("fill", applyAlpha(mix, 0.75));
-        });
-      } else if (tile.overlay.type === "shoreDetail") {
-        const foamColor = lightenColor(palette.waterHighlight || palette.water, 0.25);
-        tile.overlay.foam.setAttribute("stroke", applyAlpha(foamColor, 0.7));
-      } else if (tile.overlay.type === "pavementDetail") {
-        const highlightTone = lightenColor(color, 0.35);
-        const shadowTone = darkenColor(color, 0.35);
-        tile.overlay.highlight.setAttribute("fill", applyAlpha(highlightTone, 0.55));
-        tile.overlay.shadow.setAttribute("fill", applyAlpha(shadowTone, 0.55));
-        const seamColor = darkenColor(color, 0.45);
-        tile.overlay.seam.setAttribute("stroke", applyAlpha(seamColor, 0.7));
-        tile.overlay.crack.setAttribute("stroke", applyAlpha(darkenColor(color, 0.55), 0.65));
-      } else if (tile.overlay.type === "grassDetail") {
-        const baseTone = palette[tile.baseType] || color;
-        const shadowTone = darkenColor(baseTone, 0.35);
-        tile.overlay.shadow.setAttribute("fill", applyAlpha(shadowTone, 0.35));
-        tile.overlay.tufts.forEach((tuft, index) => {
-          const tint = index % 2 === 0 ? lightenColor(baseTone, 0.3) : lightenColor(baseTone, 0.18);
-          tuft.setAttribute("fill", applyAlpha(tint, 0.85));
-        });
-      }
-    });
-    this.gridNodes.forEach((grid) => {
-      grid.setAttribute("stroke", palette.grid);
-    });
-    this.decorNodes.forEach((node) => {
-      if (node.classList?.contains("recording")) {
-        node.setAttribute("fill", "rgba(255,255,255,0.18)");
-      }
-    });
-    for (const [id, nodes] of this.pipelineNodes.entries()) {
-      const config = this.pipelineLookup.get(id);
-      nodes.base.setAttribute("stroke", palette.pipeBase);
-      nodes.glow.setAttribute("stroke", palette.pipeGlow);
-      if (config?.color) {
-        nodes.base.setAttribute("stroke", toHex(config.color));
-      }
-    }
-    for (const unit of this.unitDefs) {
-      const node = this.unitNodes.get(unit.id);
-      if (!node) continue;
-      const baseColor = toHex(unit.color);
-      const accentColor = toHex(unit.accent);
-      node.body.setAttribute("fill", baseColor);
-      node.body.setAttribute("stroke", darkenColor(baseColor, 0.4));
-      if (node.roof) {
-        node.roof.setAttribute("fill", lightenColor(accentColor, 0.25));
-        node.roof.setAttribute("stroke", darkenColor(accentColor, 0.38));
-      }
-      if (node.shadow) {
-        node.shadow.setAttribute("fill", applyAlpha(darkenColor(baseColor, 0.55), 0.45));
-      }
-      node.highlight.setAttribute("stroke", applyAlpha(lightenColor(baseColor, 0.45), 0.85));
-      node.highlight.setAttribute("stroke-opacity", node.baseOpacity);
-      const labelBg = palette.labelBg;
-      node.group.querySelector(".unit-label").setAttribute("fill", "#f1f5ff");
-      const gaugeBg = node.group.querySelector(".gauge-bg");
-      if (gaugeBg) {
-        gaugeBg.setAttribute("fill", labelBg);
-      }
-      node.loadBar.setAttribute("fill", "#6ed16f");
-      node.healthBar.setAttribute("fill", "#66b0ff");
-    }
-  }
-
-  _calculateMapBounds() {
-    const corners = [
-      this._isoToScreen(0, 0),
-      this._isoToScreen(this.mapCols, 0),
-      this._isoToScreen(0, this.mapRows),
-      this._isoToScreen(this.mapCols, this.mapRows),
-    ];
-    const xs = corners.map((point) => point.x);
-    const ys = corners.map((point) => point.y);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-    return {
-      minX,
-      maxX,
-      minY,
-      maxY,
-      width: maxX - minX,
-      height: maxY - minY,
-      centerX: (minX + maxX) / 2,
-      centerY: (minY + maxY) / 2,
-    };
-  }
-
-_fitCameraToView({ preserveZoom = false } = {}) {
-  if (!this.mapBounds) {
-    this.mapBounds = this._calculateMapBounds();
-  }
-  
-  // Don't recalculate if we already have a valid home position
-  if (this.camera.homeZoom !== 1 || this.camera.homeOffsetX !== 0 || this.camera.homeOffsetY !== 0) {
-    // Just apply existing home values
-    if (!this.camera.userControlled) {
-      this.camera.zoom = this.camera.homeZoom;
-      this.camera.offsetX = this.camera.homeOffsetX;
-      this.camera.offsetY = this.camera.homeOffsetY;
-      this._updateCameraTransform();
-    }
-    return;
-  }
-  
-  // Only calculate home position once
-  const marginX = 160;
-  const marginY = 140;
-  const availableWidth = this.viewWidth - marginX;
-  const availableHeight = this.viewHeight - marginY;
-  
-  const scaleX = availableWidth / Math.max(1, this.mapBounds.width);
-  const scaleY = availableHeight / Math.max(1, this.mapBounds.height);
-  const targetZoom = clamp(Math.min(scaleX, scaleY), this.camera.minZoom, this.camera.maxZoom);
-  
-  this.camera.homeZoom = targetZoom;
-  const centered = this._centeredOffsets(targetZoom);
-  this.camera.homeOffsetX = Math.round(centered.offsetX * 100) / 100;
-  this.camera.homeOffsetY = Math.round(centered.offsetY * 100) / 100;
-  
-  this.camera.zoom = this.camera.homeZoom;
-  this.camera.offsetX = this.camera.homeOffsetX;
-  this.camera.offsetY = this.camera.homeOffsetY;
-  
-  this._updateCameraTransform();
-}
-
-  _updateCameraTransform() {
-    const { zoom, offsetX, offsetY } = this.camera;
-    const matrix = `${zoom.toFixed(4)} 0 0 ${zoom.toFixed(4)} ${offsetX.toFixed(2)} ${offsetY.toFixed(2)}`;
-    this.worldGroup.setAttribute("transform", `matrix(${matrix})`);
-  }
-
-_clampCamera() {
-  if (!this.mapBounds) return false;
-
-  const { minX, maxX, minY, maxY } = this.mapBounds;
-  const { zoom } = this.camera;
-  let { offsetX, offsetY } = this.camera;
-
-  // Work in viewBox units (same space as the transform matrix)
-  const width = this.viewWidth;
-  const height = this.viewHeight;
-
-  const mapWidth = (maxX - minX) * zoom;
-  const mapHeight = (maxY - minY) * zoom;
-
-  // Only give extra breathing room when the map is smaller than the viewport
-  const margin = 48;
-  const extraX = Math.max((width  - mapWidth)  / 2, 0);
-  const extraY = Math.max((height - mapHeight) / 2, 0);
-  const effectiveMarginX = Math.min(margin, extraX);
-  const effectiveMarginY = Math.min(margin, extraY);
-
-  // Bounds that ensure at least one edge remains visible.
-  // IMPORTANT: do NOT average if they cross; clamp using the sorted bounds.
-  const boundMinX = effectiveMarginX - minX * zoom;
-  const boundMaxX = width - effectiveMarginX - maxX * zoom;
-  const loX = Math.min(boundMinX, boundMaxX);
-  const hiX = Math.max(boundMinX, boundMaxX);
-  offsetX = clamp(offsetX, loX, hiX);
-
-  const boundMinY = effectiveMarginY - minY * zoom;
-  const boundMaxY = height - effectiveMarginY - maxY * zoom;
-  const loY = Math.min(boundMinY, boundMaxY);
-  const hiY = Math.max(boundMinY, boundMaxY);
-  offsetY = clamp(offsetY, loY, hiY);
-
-  const changed =
-    Math.abs(offsetX - this.camera.offsetX) > 0.001 ||
-    Math.abs(offsetY - this.camera.offsetY) > 0.001;
-
-  this.camera.offsetX = offsetX;
-  this.camera.offsetY = offsetY;
-  return changed;
-}
-
-
-_centeredOffsets(zoom) {
-  if (!this.mapBounds) {
-    return { offsetX: this.camera.offsetX || 0, offsetY: this.camera.offsetY || 0 };
-  }
-  // Center the map in viewBox units. Display pixel size is irrelevant here.
-  const offsetX = this.viewWidth / 2 - this.mapBounds.centerX * zoom;
-  const offsetY = this.viewHeight / 2 - this.mapBounds.centerY * zoom;
-  return { offsetX, offsetY };
-}
-
-
-
-_stabilizeCamera() {
-  // Completely disabled - no camera stabilization
-  return;
-}
-
-beginPan(screenX, screenY) {
-  // Stop any animation and lock current position
-  this.camera.offsetX = Math.round(this.camera.offsetX * 100) / 100;
-  this.camera.offsetY = Math.round(this.camera.offsetY * 100) / 100;
-  
-  this.panSession = {
-    startX: screenX,
-    startY: screenY,
-    baseOffsetX: this.camera.offsetX,
-    baseOffsetY: this.camera.offsetY,
-  };
-  this.camera.userControlled = true;
-}
-
-panTo(screenX, screenY) {
-  if (!this.panSession) {
-    return;
-  }
-  const dx = screenX - this.panSession.startX;
-  const dy = screenY - this.panSession.startY;
-  this.camera.offsetX = this.panSession.baseOffsetX + dx;
-  this.camera.offsetY = this.panSession.baseOffsetY + dy;
-  this._clampCamera();
-  this._updateCameraTransform();
-}
-
-endPan() {
-  this.panSession = null;
-}
-isPanning() {
-  return Boolean(this.panSession);
-}
-
-  zoomAt(screenX, screenY, deltaY) {
-    const zoomFactor = Math.exp(-deltaY * 0.0012);
-    const nextZoom = clamp(this.camera.zoom * zoomFactor, this.camera.minZoom, this.camera.maxZoom);
-    if (Math.abs(nextZoom - this.camera.zoom) < 0.0001) {
-      return;
-    }
-    const worldX = (screenX - this.camera.offsetX) / this.camera.zoom;
-    const worldY = (screenY - this.camera.offsetY) / this.camera.zoom;
-    this.camera.zoom = nextZoom;
-    this.camera.offsetX = screenX - worldX * nextZoom;
-    this.camera.offsetY = screenY - worldY * nextZoom;
-    this.camera.userControlled = true;
+  _moveCameraTo(wx, wy){
+    this.camera.ox = this.canvas.width/2 - wx * this.camera.zoom;
+    this.camera.oy = this.canvas.height/2 - wy * this.camera.zoom;
     this._clampCamera();
-    this._updateCameraTransform();
   }
 
-  focusOnUnit(unitId, { onlyIfVisible = true } = {}) {
-    if (!unitId) {
-      return;
-    }
-    const unit = this.unitDefs.find((entry) => entry.id === unitId);
-    if (!unit) {
-      return;
-    }
-    const center = this._tileToScreen(unit.tileX + unit.width / 2, unit.tileY + unit.height / 2);
-    const screen = this._worldToScreen(center.x, center.y);
-    const margin = 120;
-    if (
-      onlyIfVisible &&
-      screen.x >= margin &&
-      screen.x <= this.viewWidth - margin &&
-      screen.y >= margin &&
-      screen.y <= this.viewHeight - margin
-    ) {
-      return;
-    }
-    this._moveCameraTo(center.x, center.y);
-    this.camera.userControlled = true;
+  _fitCameraToView(){
+    const b = this._mapBounds();
+    const padX = 160 * this.dpr, padY = 140 * this.dpr;
+    const availW = this.canvas.width - padX;
+    const availH = this.canvas.height - padY;
+    const scaleX = availW / Math.max(1, b.width);
+    const scaleY = availH / Math.max(1, b.height);
+    const target = clamp(Math.min(scaleX, scaleY), this.camera.min, this.camera.max);
+    const { ox, oy } = this._centeredAt(target);
+    this.camera.homeZoom = target; this.camera.zoom = target;
+    this.camera.homeOX = ox; this.camera.homeOY = oy;
+    this.camera.ox = ox; this.camera.oy = oy;
   }
 
-  _worldToScreen(worldX, worldY) {
-    return {
-      x: worldX * this.camera.zoom + this.camera.offsetX,
-      y: worldY * this.camera.zoom + this.camera.offsetY,
-    };
+  _clampCamera(){
+    const b = this._mapBounds();
+    const z = this.camera.zoom;
+    const mapW = b.width * z, mapH = b.height * z;
+    const margin = 48 * this.dpr;
+    // allow breathing room if map smaller than viewport
+    const extraX = Math.max((this.canvas.width  - mapW)/2, 0);
+    const extraY = Math.max((this.canvas.height - mapH)/2, 0);
+    const effX = Math.min(margin, extraX);
+    const effY = Math.min(margin, extraY);
+
+    const minOX =  effX - b.minX * z;
+    const maxOX =  this.canvas.width - effX - b.maxX * z;
+    const loX = Math.min(minOX, maxOX), hiX = Math.max(minOX, maxOX);
+
+    const minOY =  effY - b.minY * z;
+    const maxOY =  this.canvas.height - effY - b.maxY * z;
+    const loY = Math.min(minOY, maxOY), hiY = Math.max(minOY, maxOY);
+
+    this.camera.ox = clamp(this.camera.ox, loX, hiX);
+    this.camera.oy = clamp(this.camera.oy, loY, hiY);
   }
 
-  _moveCameraTo(worldX, worldY) {
-    this.camera.offsetX = this.viewWidth / 2 - worldX * this.camera.zoom;
-    this.camera.offsetY = this.viewHeight / 2 - worldY * this.camera.zoom;
-    this._clampCamera();
-    this._updateCameraTransform();
+  _mapBounds(){
+    const corners = [
+      this._tileToScreen(0,0),
+      this._tileToScreen(this.cols,0),
+      this._tileToScreen(0,this.rows),
+      this._tileToScreen(this.cols,this.rows),
+    ];
+    const xs = corners.map(p=>p.x), ys = corners.map(p=>p.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+    return { minX, maxX, minY, maxY, width: maxX-minX, height: maxY-minY };
   }
 
-  _buildBaseTiles() {
-    const tiles = Array.from({ length: this.mapRows }, () =>
-      Array.from({ length: this.mapCols }, () => "pavement")
-    );
+  /* --------------------- tiles, decor, textures -------------------- */
+  _buildTiles(){
+    const T = Array.from({length:this.rows},()=>Array.from({length:this.cols},()=> "pavement"));
+    for (let y=0;y<this.rows;y++){
+      for (let x=0;x<this.cols;x++){
+        if (x<2 && y<6) T[y][x]="water";
+        else if (x<2 && y<8) T[y][x]="shore";
+        else if (y>=this.rows-3 && x<4) T[y][x]="field";
+        else if (y>=this.rows-4 && x<5) T[y][x]="field";
+        else if (y<3 && x>=this.cols-3) T[y][x]="water";
+        else if (x===2 && y>=6 && y<this.rows-1) T[y][x]="grass";
+        else if (y===this.rows-1 && x>=4) T[y][x]="grass";
+        else if (y>=3 && y<=4 && x>=3 && x<=5) T[y][x]="green";
 
-    for (let y = 0; y < this.mapRows; y += 1) {
-      for (let x = 0; x < this.mapCols; x += 1) {
-        if (x < 2 && y < 6) {
-          tiles[y][x] = "water";
-        } else if (x < 2 && y < 8) {
-          tiles[y][x] = "shore";
-        } else if (y >= this.mapRows - 3 && x < 4) {
-          tiles[y][x] = "field";
-        } else if (y >= this.mapRows - 4 && x < 5) {
-          tiles[y][x] = "field";
-        } else if (y < 3 && x >= this.mapCols - 3) {
-          tiles[y][x] = "water";
-        } else if (x === 2 && y >= 6 && y < this.mapRows - 1) {
-          tiles[y][x] = "grass";
-        } else if (y === this.mapRows - 1 && x >= 4) {
-          tiles[y][x] = "grass";
-        } else if (y >= 3 && y <= 4 && x >= 3 && x <= 5) {
-          tiles[y][x] = "green";
-        }
-        const current = tiles[y][x];
-        if (
-          y === 5 &&
-          x >= 2 &&
-          x <= this.mapCols - 2 &&
-          current !== "water" &&
-          current !== "shore"
-        ) {
-          tiles[y][x] = current?.startsWith("road") ? "road-cross" : "road-ew";
-        }
-        if (
-          x === 7 &&
-          y >= 2 &&
-          y <= this.mapRows - 2 &&
-          current !== "water" &&
-          current !== "shore"
-        ) {
-          tiles[y][x] = tiles[y][x]?.startsWith("road") ? "road-cross" : "road-ns";
-        }
-        if (
-          (x === 6 || x === 8 || (y === 6 && (x === 5 || x === 9))) &&
-          tiles[y][x] !== "water" &&
-          tiles[y][x] !== "shore" &&
-          !tiles[y][x]?.startsWith("road")
-        ) {
-          tiles[y][x] = "walkway";
-        }
+        const cur = T[y][x];
+        if (y===5 && x>=2 && x<=this.cols-2 && cur!=="water" && cur!=="shore")
+          T[y][x] = cur.startsWith("road")? "road-cross" : "road-ew";
+        if (x===7 && y>=2 && y<=this.rows-2 && cur!=="water" && cur!=="shore")
+          T[y][x] = T[y][x].startsWith("road")? "road-cross" : "road-ns";
+        if ((x===6||x===8||(y===6&&(x===5||x===9))) && !["water","shore"].includes(T[y][x]) && !T[y][x].startsWith("road"))
+          T[y][x] = "walkway";
       }
     }
-    return tiles;
+    return T;
   }
-
-  _buildDecor() {
+  _buildDecor(){
     return [
-      { type: "parking", x: 12.5, y: 1.8, width: 2.5, height: 1.8 },
-      { type: "booth", x: 5.2, y: 10.4 },
-      { type: "flare", x: 9.5, y: 2.1 },
-      { type: "dock", x: 14.2, y: 9.6 },
-      { type: "barn", x: 1.8, y: 10.2 },
-      { type: "recording", x: 6.8, y: 0.6 },
+      { type:"parking",  x:12.5, y:1.8, width:2.5, height:1.8 },
+      { type:"booth",    x:5.2,  y:10.4 },
+      { type:"flare",    x:9.5,  y:2.1 },
+      { type:"dock",     x:14.2, y:9.6 },
+      { type:"barn",     x:1.8,  y:10.2 },
+      { type:"recording",x:6.8,  y:0.6 },
     ];
   }
 
-  _tileToScreen(tileX, tileY) {
-    return this._isoToScreen(tileX, tileY);
+  _makeDitherTextures(){
+    // create 2x2 patterns per surface in the current palette
+    const pal = this.palettes[this.paletteIndex];
+    const mk = (base, dot) => {
+      const c = document.createElement("canvas"); c.width=2; c.height=2;
+      const g = c.getContext("2d");
+      g.fillStyle = base; g.fillRect(0,0,2,2);
+      g.fillStyle = dot; g.fillRect(0,0,1,1); g.fillRect(1,1,1,1);
+      return this.ctx.createPattern(c,"repeat");
+    };
+    this.tex = {
+      pavement: mk(pal.pavement, darken(pal.pavement, .22)),
+      grass:    mk(pal.grass,    darken(pal.grass,    .25)),
+      field:    mk(pal.field,    lighten(pal.field,   .18)),
+      water:    mk(pal.water,    darken(pal.water,    .25)),
+      green:    mk(pal.green,    darken(pal.green,    .2))
+    };
   }
-
-  _isoToScreen(worldX, worldY) {
-    const screenX = this.originX + (worldX - worldY) * (this.tileWidth / 2);
-    const screenY = this.originY + (worldX + worldY) * (this.tileHeight / 2);
-    return { x: screenX, y: screenY };
+  _textureFor(type, pal){
+    if (type==="pavement") return this.tex.pavement;
+    if (type==="grass")    return this.tex.grass;
+    if (type==="field")    return this.tex.field;
+    if (type==="water")    return this.tex.water;
+    if (type==="green")    return this.tex.green;
+    if (type==="shore")    return this.tex.pavement;
+    if (type.startsWith("road") || type==="walkway") return pal.pavement;
+    return pal.pavement;
   }
-
-  _tileDiamondPoints(tileX, tileY) {
-    const { x, y } = this._tileToScreen(tileX, tileY);
-    return [
-      [x, y],
-      [x + this.tileWidth / 2, y + this.tileHeight / 2],
-      [x, y + this.tileHeight],
-      [x - this.tileWidth / 2, y + this.tileHeight / 2],
-    ];
-  }
-
-  _footprintPoints(unit, relative = false) {
-    const corners = [
-      this._isoToScreen(unit.tileX, unit.tileY),
-      this._isoToScreen(unit.tileX + unit.width, unit.tileY),
-      this._isoToScreen(unit.tileX + unit.width, unit.tileY + unit.height),
-      this._isoToScreen(unit.tileX, unit.tileY + unit.height),
-    ];
-    if (!relative) {
-      return corners.map((point) => [point.x, point.y]);
-    }
-    const center = this._tileToScreen(unit.tileX + unit.width / 2, unit.tileY + unit.height / 2);
-    return corners.map((point) => [point.x - center.x, point.y - center.y]);
-  }
-
-  _unitBodyPoints(unit) {
-    const width = this.tileWidth * Math.max(0.55, unit.width * 0.45);
-    const height = this.tileHeight * Math.max(0.6, unit.height * 0.5);
-    return [
-      [0, -height / 2],
-      [width / 2, 0],
-      [0, height / 2],
-      [-width / 2, 0],
-    ];
-  }
-
-  _pipelinePath(points) {
-    return points
-      .map((point, index) => {
-        const { x, y } = this._tileToScreen(point.x, point.y);
-        const prefix = index === 0 ? "M" : "L";
-        return `${prefix}${x.toFixed(1)} ${y.toFixed(1)}`;
-      })
-      .join(" ");
-  }
-
-  _diamondPoints(worldX, worldY) {
-    const { x, y } = this._isoToScreen(worldX, worldY);
-    return [
-      [x, y],
-      [x + this.tileWidth / 2, y + this.tileHeight / 2],
-      [x, y + this.tileHeight],
-      [x - this.tileWidth / 2, y + this.tileHeight / 2],
-    ];
+  _colorFor(type, pal){
+    if (type==="pavement") return pal.pavement;
+    if (type==="grass") return pal.grass;
+    if (type==="field") return pal.field;
+    if (type==="water") return pal.water;
+    if (type==="green") return pal.green;
+    if (type==="shore") return pal.shore;
+    if (type.startsWith("road")) return pal.road;
+    if (type==="walkway") return pal.walkway;
+    return pal.pavement;
   }
 }
 
-function createSvgElement(tag, attrs = {}) {
-  const element = document.createElementNS(SVG_NS, tag);
-  Object.entries(attrs).forEach(([key, value]) => {
-    if (value === null || value === undefined) return;
-    element.setAttribute(key, value);
-  });
-  return element;
+/* ----------------------- canvas geometry helpers ------------------- */
+function pathPolygon(ctx, pts){ ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (let i=1;i<pts.length;i++) ctx.lineTo(pts[i][0], pts[i][1]); ctx.closePath(); }
+function diamond(cx, cy, w, h){
+  const hw=w/2, hh=h/2;
+  return [[cx,cy-hh],[cx+hw,cy],[cx,cy+hh],[cx-hw,cy]];
+}
+function roundRect(ctx, x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+function hexWithAlpha(hex, alpha){
+  const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${alpha})`;
 }
 
-function pointsToString(points) {
-  return points.map((point) => `${point[0].toFixed(1)},${point[1].toFixed(1)}`).join(" ");
-}
+/* =================================================================== */
+/* ===========================  APP WIRING  ========================== */
+/* =================================================================== */
 
-function translatePoints(points, dx, dy) {
-  return points.map(([x, y]) => [x + dx, y + dy]);
-}
-
-function scalePoints(points, scaleX, scaleY = scaleX) {
-  return points.map(([x, y]) => [x * scaleX, y * scaleY]);
-}
-
-function diamondPoints(cx, cy, width, height) {
-  const halfWidth = width / 2;
-  const halfHeight = height / 2;
-  return [
-    [cx, cy - halfHeight],
-    [cx + halfWidth, cy],
-    [cx, cy + halfHeight],
-    [cx - halfWidth, cy],
-  ];
-}
-function toHex(colorInt) {
-  const hex = colorInt.toString(16).padStart(6, "0");
-  return `#${hex}`;
-}
-
-function applyAlpha(hexColor, alpha) {
-  const r = parseInt(hexColor.slice(1, 3), 16);
-  const g = parseInt(hexColor.slice(3, 5), 16);
-  const b = parseInt(hexColor.slice(5, 7), 16);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
-function mixColor(baseHex, mixHex, amount) {
-  const clamp01 = (value) => Math.min(Math.max(value, 0), 1);
-  const a = clamp01(amount);
-  const base = baseHex.startsWith("#") ? baseHex.slice(1) : baseHex;
-  const mix = mixHex.startsWith("#") ? mixHex.slice(1) : mixHex;
-  const baseR = parseInt(base.slice(0, 2), 16);
-  const baseG = parseInt(base.slice(2, 4), 16);
-  const baseB = parseInt(base.slice(4, 6), 16);
-  const mixR = parseInt(mix.slice(0, 2), 16);
-  const mixG = parseInt(mix.slice(2, 4), 16);
-  const mixB = parseInt(mix.slice(4, 6), 16);
-  const r = Math.round(baseR + (mixR - baseR) * a);
-  const g = Math.round(baseG + (mixG - baseG) * a);
-  const b = Math.round(baseB + (mixB - baseB) * a);
-  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
-}
-
-function lightenColor(baseHex, amount) {
-  return mixColor(baseHex, "#ffffff", amount);
-}
-
-function darkenColor(baseHex, amount) {
-  return mixColor(baseHex, "#000000", amount);
-}
-
-const renderer = new TileRenderer(mapViewport, simulation, unitConfigs, pipelineConfigs);
+const renderer = new CanvasRenderer(mapViewport, simulation, unitConfigs, pipelineConfigs);
 const surface = renderer.getSurface();
 
+/* ------------------------------ UI state --------------------------- */
 const unitPulseEntries = new Map();
 const unitModeLabels = new Map();
 let selectedUnitId = null;
@@ -1963,151 +714,46 @@ let gridVisible = true;
 let flowOverlayVisible = true;
 let activeMenu = null;
 let panPointerId = null;
-let panMoved = false;
-let panStart = { x: 0, y: 0 };
+
+/* ------------------------- presets & menus (unchanged) ------------- */
 const PRESETS = {
-  auto: {
-    label: "AUTO",
-    crude: 120,
-    focus: 0.5,
-    maintenance: 0.65,
-    safety: 0.45,
-    environment: 0.35,
-    log: "Operator returned controls to automatic balancing.",
-  },
-  manual: {
-    label: "MANUAL",
-    crude: 180,
-    focus: 0.68,
-    maintenance: 0.45,
-    safety: 0.36,
-    environment: 0.22,
-    log: "Manual push: throughput prioritized for gasoline blending.",
-  },
-  shutdown: {
-    label: "SHUTDN",
-    crude: 0,
-    focus: 0.5,
-    maintenance: 0.82,
-    safety: 0.72,
-    environment: 0.55,
-    log: "Emergency shutdown drill initiated.",
-  },
+  auto:    { label:"AUTO",   crude:120, focus:0.5,  maintenance:0.65, safety:0.45, environment:0.35, log:"Operator returned controls to automatic balancing." },
+  manual:  { label:"MANUAL", crude:180, focus:0.68, maintenance:0.45, safety:0.36, environment:0.22, log:"Manual push: throughput prioritized for gasoline blending." },
+  shutdown:{ label:"SHUTDN", crude:0,   focus:0.5,  maintenance:0.82, safety:0.72, environment:0.55, log:"Emergency shutdown drill initiated." },
 };
-
 const SESSION_PRESETS = {
-  legacy: {
-    scenario: "maintenanceCrunch",
-    params: {
-      crude: 112,
-      focus: 0.46,
-      maintenance: 0.38,
-      safety: 0.34,
-      environment: 0.28,
-    },
-    storageLevels: { gasoline: 212, diesel: 158, jet: 122 },
-    shipments: [
-      { product: "gasoline", volume: 88, window: 4.2, dueIn: 0.9 },
-      { product: "diesel", volume: 74, window: 3.8, dueIn: 0.6 },
-    ],
-    shipmentStats: { total: 4, onTime: 2, missed: 2 },
-    nextShipmentIn: 0.8,
-    units: [
-      { id: "distillation", integrity: 0.58 },
-      { id: "reformer", integrity: 0.4 },
-      { id: "fcc", integrity: 0.45 },
-      { id: "hydrocracker", integrity: 0.42, downtime: 95 },
-      { id: "alkylation", integrity: 0.5 },
-      { id: "sulfur", integrity: 0.56 },
-    ],
-    marketStress: 0.44,
-    timeMinutes: 60 * 9,
-    log: "Recovered training save loaded — tanks brimmed and maintenance overdue.",
-  },
-  modern: {
-    scenario: "exportPush",
-    params: {
-      crude: 168,
-      focus: 0.64,
-      maintenance: 0.55,
-      safety: 0.48,
-      environment: 0.32,
-    },
-    storageLevels: { gasoline: 126, diesel: 104, jet: 68 },
-    shipments: [
-      { product: "jet", volume: 82, window: 5.5, dueIn: 1.6 },
-      { product: "gasoline", volume: 64, window: 4.8, dueIn: 2.1 },
-    ],
-    shipmentStats: { total: 3, onTime: 1, missed: 0 },
-    nextShipmentIn: 1.4,
-    units: [
-      { id: "reformer", integrity: 0.72 },
-      { id: "hydrocracker", integrity: 0.68 },
-      { id: "alkylation", integrity: 0.74 },
-    ],
-    unitOverrides: {
-      hydrocracker: { throttle: 1.08 },
-      sulfur: { throttle: 1.05 },
-    },
-    marketStress: 0.3,
-    timeMinutes: 60 * 3,
-    log: "Modernization drill loaded — chase export contracts without breaking reliability.",
-  },
+  legacy: { scenario:"maintenanceCrunch", params:{ crude:112, focus:0.46, maintenance:0.38, safety:0.34, environment:0.28 },
+            storageLevels:{ gasoline:212, diesel:158, jet:122 },
+            shipments:[ {product:"gasoline", volume:88, window:4.2, dueIn:0.9},{product:"diesel", volume:74, window:3.8, dueIn:0.6} ],
+            shipmentStats:{ total:4, onTime:2, missed:2 }, nextShipmentIn:0.8,
+            units:[ {id:"distillation", integrity:0.58},{id:"reformer", integrity:0.4},{id:"fcc", integrity:0.45},{id:"hydrocracker", integrity:0.42, downtime:95},{id:"alkylation", integrity:0.5},{id:"sulfur", integrity:0.56} ],
+            marketStress:0.44, timeMinutes:60*9, log:"Recovered training save loaded — tanks brimmed and maintenance overdue." },
+  modern: { scenario:"exportPush", params:{ crude:168, focus:0.64, maintenance:0.55, safety:0.48, environment:0.32 },
+            storageLevels:{ gasoline:126, diesel:104, jet:68 },
+            shipments:[ {product:"jet", volume:82, window:5.5, dueIn:1.6},{product:"gasoline", volume:64, window:4.8, dueIn:2.1} ],
+            shipmentStats:{ total:3, onTime:1, missed:0 }, nextShipmentIn:1.4,
+            units:[ {id:"reformer", integrity:0.72},{id:"hydrocracker", integrity:0.68},{id:"alkylation", integrity:0.74} ],
+            unitOverrides:{ hydrocracker:{throttle:1.08}, sulfur:{throttle:1.05} },
+            marketStress:0.3, timeMinutes:60*3, log:"Modernization drill loaded — chase export contracts without breaking reliability." }
 };
 
+/* ----------------------------- toolbar wiring (unchanged) ---------- */
 const toolbarPresetButtons = document.querySelectorAll("[data-preset]");
-const toolbarUnitButtons = document.querySelectorAll("[data-unit-target]");
+const toolbarUnitButtons   = document.querySelectorAll("[data-unit-target]");
 const toolbarScenarioButtons = document.querySelectorAll("[data-scenario]");
-
-toolbarPresetButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    const preset = button.dataset.preset;
-    applyPreset(preset);
-  });
-});
-
-toolbarUnitButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    const target = button.dataset.unitTarget || null;
-    setSelectedUnit(target);
-    ui.selectUnit(target);
-  });
-});
-
-toolbarScenarioButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    const scenario = button.dataset.scenario;
-    if (!scenario) return;
-    simulation.applyScenario(scenario);
-    ui.setScenario(scenario);
-    updateScenarioButtons(scenario);
-  });
-});
+toolbarPresetButtons.forEach(b => b.addEventListener("click", () => applyPreset(b.dataset.preset)));
+toolbarUnitButtons.forEach(b => b.addEventListener("click", () => { const t=b.dataset.unitTarget||null; setSelectedUnit(t); ui.selectUnit(t); }));
+toolbarScenarioButtons.forEach(b => b.addEventListener("click", () => { const s=b.dataset.scenario; if (!s) return; simulation.applyScenario(s); ui.setScenario(s); updateScenarioButtons(s); }));
 
 const sliderInputs = document.querySelectorAll('#hud input[type="range"]');
-sliderInputs.forEach((input) => {
-  input.addEventListener("input", () => {
-    updatePresetButtons(null);
-    activePreset = null;
-    if (typeof ui.setModeBadge === "function") {
-      ui.setModeBadge("CUSTOM");
-    }
-  });
-});
+sliderInputs.forEach(input => input.addEventListener("input", () => {
+  updatePresetButtons(null); activePreset=null; if (typeof ui.setModeBadge === "function") ui.setModeBadge("CUSTOM");
+}));
 
-if (ui.elements?.scenario) {
-  ui.elements.scenario.addEventListener("change", (event) => {
-    updateScenarioButtons(event.target.value);
-  });
-}
+if (ui.elements?.scenario) ui.elements.scenario.addEventListener("change", e => updateScenarioButtons(e.target.value));
 
-ui.onRunningChange = (running) => {
-  updateMenuToggle(running);
-};
-
-ui.onReset = () => {
-  performSimulationReset();
-};
+ui.onRunningChange = (running) => updateMenuToggle(running);
+ui.onReset = () => performSimulationReset();
 
 applyPreset("auto", { silent: true });
 updatePresetButtons("auto");
@@ -2124,537 +770,241 @@ buildProcessLegend();
 initializeUnitPulseList();
 renderPrototypeNotes();
 
-if (mapToolbar) {
-  mapToolbar.addEventListener("click", (event) => {
-    const button = event.target.closest("button[data-command]");
-    if (!button) return;
-    const command = button.dataset.command;
-    handleToolbarCommand(command);
-  });
-}
-
+/* ------------------------------ resizing --------------------------- */
 if ("ResizeObserver" in window) {
-  let lastW = 0;
-  let lastH = 0;
-  let rafId = 0;
-
-  const resizeObserver = new ResizeObserver(() => {
-    cancelAnimationFrame(rafId);
-    rafId = requestAnimationFrame(() => {
-      const rect = mapViewport.getBoundingClientRect();
-      const w = Math.floor(rect.width);
-      const h = Math.floor(rect.height);
-      if (w === lastW && h === lastH) return; // no real change
-      lastW = w;
-      lastH = h;
-      renderer.resizeToContainer(mapViewport);
+  let lastW=0, lastH=0, raf=0;
+  const ro = new ResizeObserver(() => {
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => {
+      const r = mapViewport.getBoundingClientRect();
+      const w = Math.floor(r.width), h = Math.floor(r.height);
+      if (w===lastW && h===lastH) return;
+      lastW=w; lastH=h; renderer.resizeToContainer(mapViewport);
     });
   });
-
-  // Initialize the cache and start observing
-  (() => {
-    const rect = mapViewport.getBoundingClientRect();
-    lastW = Math.floor(rect.width);
-    lastH = Math.floor(rect.height);
-  })();
-
-  resizeObserver.observe(mapViewport);
+  const r = mapViewport.getBoundingClientRect();
+  lastW=Math.floor(r.width); lastH=Math.floor(r.height);
+  ro.observe(mapViewport);
 }
 
-
-surface.addEventListener("mousemove", (event) => {
-  if (typeof renderer.isPanning === "function" && renderer.isPanning()) {
-    return;
-  }
+/* ------------------------------- input ----------------------------- */
+// pointer hover (only when not panning)
+surface.addEventListener("mousemove", (e) => {
+  if (renderer.isPanning?.()) return;
   const rect = surface.getBoundingClientRect();
-  const pointerX = (event.clientX - rect.left) * renderer.deviceScaleX;
-  const pointerY = (event.clientY - rect.top) * renderer.deviceScaleY;
-  const iso = renderer.screenToIso(pointerX, pointerY);
+  const px = (e.clientX - rect.left) * renderer.deviceScaleX;
+  const py = (e.clientY - rect.top)  * renderer.deviceScaleY;
+  const iso = renderer.screenToIso(px, py);
   renderer.setPointer(iso.x, iso.y, true);
   const unit = renderer.getUnitAt(iso.x, iso.y);
-  const unitId = unit?.id || null;
-  if (unitId !== renderer.hoverUnitId) {
-    renderer.setHoverUnit(unitId);
-    highlightPipelinesForUnit(unitId || selectedUnitId);
+  const id = unit?.id || null;
+  if (id !== renderer.hoverUnitId) {
+    renderer.setHoverUnit(id);
+    highlightPipelinesForUnit(id || selectedUnitId);
   }
 });
-
 surface.addEventListener("mouseleave", () => {
-  renderer.setPointer(0, 0, false);
+  renderer.setPointer(0,0,false);
   renderer.setHoverUnit(null);
-  if (selectedUnitId) {
-    highlightPipelinesForUnit(selectedUnitId);
-  } else {
-    clearPipelineHighlight();
-  }
+  if (selectedUnitId) highlightPipelinesForUnit(selectedUnitId); else clearPipelineHighlight();
 });
 
-surface.addEventListener("pointerdown", (event) => {
-  if (event.button !== 0) return;
-  event.preventDefault(); // stop text selection/page scroll
-
+// drag to pan
+let panMoved = false, panStart = {x:0,y:0};
+surface.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return;
+  e.preventDefault();
   const rect = surface.getBoundingClientRect();
-  const pointerX = (event.clientX - rect.left) * renderer.deviceScaleX;
-  const pointerY = (event.clientY - rect.top) * renderer.deviceScaleY;
-
-  panPointerId = event.pointerId;
-  panStart = { x: pointerX, y: pointerY };
-  panMoved = false;
-  surface.setPointerCapture(event.pointerId);
+  const px = (e.clientX - rect.left) * renderer.deviceScaleX;
+  const py = (e.clientY - rect.top)  * renderer.deviceScaleY;
+  panStart = { x:px, y:py }; panMoved=false;
+  surface.setPointerCapture(e.pointerId);
+  renderer.beginPan(px, py);
 });
-
-
-surface.addEventListener("pointermove", (event) => {
-  if (panPointerId !== event.pointerId) {
-    return;
-  }
+surface.addEventListener("pointermove", (e) => {
+  if (!renderer.isPanning?.()) return;
   const rect = surface.getBoundingClientRect();
-  const pointerX = (event.clientX - rect.left) * renderer.deviceScaleX;
-  const pointerY = (event.clientY - rect.top) * renderer.deviceScaleY;
-  if (!renderer.isPanning()) {
-    const dx = pointerX - panStart.x;
-    const dy = pointerY - panStart.y;
-    if (Math.hypot(dx, dy) > 6) {
-      renderer.beginPan(panStart.x, panStart.y);
-      renderer.setPointer(0, 0, false);
-      if (mapViewport) {
-        mapViewport.classList.add("panning");
-      }
-    } else {
-      return;
-    }
-  }
-  renderer.panTo(pointerX, pointerY);
+  const px = (e.clientX - rect.left) * renderer.deviceScaleX;
+  const py = (e.clientY - rect.top)  * renderer.deviceScaleY;
+  renderer.panTo(px, py);
   panMoved = true;
 });
+const endPan = (e) => { if (renderer.isPanning?.()) renderer.endPan(); surface.releasePointerCapture(e.pointerId); };
+surface.addEventListener("pointerup", endPan);
+surface.addEventListener("pointercancel", endPan);
 
-const endPan = (event) => {
-  if (panPointerId !== event.pointerId) {
-    return;
-  }
-  if (renderer.isPanning()) {
-    renderer.endPan();
-  }
-  if (mapViewport) {
-    mapViewport.classList.remove("panning");
-  }
-  surface.releasePointerCapture(event.pointerId);
-  panPointerId = null;
-};
-
-surface.addEventListener("pointerup", (event) => {
-  endPan(event);
-});
-
-surface.addEventListener("pointercancel", (event) => {
-  endPan(event);
-});
-
-surface.addEventListener(
-  "wheel",
-  (event) => {
-    event.preventDefault();
-    const rect = surface.getBoundingClientRect();
-    const pointerX = (event.clientX - rect.left) * renderer.deviceScaleX;
-    const pointerY = (event.clientY - rect.top) * renderer.deviceScaleY;
-    const panIntent = event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY) * 0.75;
-    if (panIntent) {
-      let deltaX = event.deltaX;
-      let deltaY = event.deltaY;
-      const DOM_DELTA_LINE = typeof WheelEvent !== "undefined" ? WheelEvent.DOM_DELTA_LINE : 1;
-      const DOM_DELTA_PAGE = typeof WheelEvent !== "undefined" ? WheelEvent.DOM_DELTA_PAGE : 2;
-      if (event.deltaMode === DOM_DELTA_LINE) {
-        deltaX *= 32;
-        deltaY *= 32;
-      } else if (event.deltaMode === DOM_DELTA_PAGE) {
-        deltaX *= surface.clientWidth || 1;
-        deltaY *= surface.clientHeight || 1;
-      }
-      deltaX = -deltaX * renderer.deviceScaleX;
-      deltaY = -deltaY * renderer.deviceScaleY;
-      renderer.nudgeCamera(deltaX, deltaY);
-    } else {
-      renderer.zoomAt(pointerX, pointerY, event.deltaY);
-    }
-  },
-  { passive: false }
-);
-
-surface.addEventListener("dblclick", (event) => {
-  event.preventDefault();
-  renderer.resetView();
-});
-
-surface.addEventListener("click", (event) => {
-  if (event.detail > 1) {
-    return;
-  }
-  if (panMoved) {
-    panMoved = false;
-    return;
-  }
+// wheel: PAN by default; hold Ctrl/Cmd/Alt (or pinch) to zoom
+surface.addEventListener("wheel", (e) => {
+  e.preventDefault();
   const rect = surface.getBoundingClientRect();
-  const pointerX = (event.clientX - rect.left) * renderer.deviceScaleX;
-  const pointerY = (event.clientY - rect.top) * renderer.deviceScaleY;
-  const iso = renderer.screenToIso(pointerX, pointerY);
+  const px = (e.clientX - rect.left) * renderer.deviceScaleX;
+  const py = (e.clientY - rect.top)  * renderer.deviceScaleY;
+
+  const zoomIntent = e.ctrlKey || e.metaKey || e.altKey;
+  if (zoomIntent) { renderer.zoomAt(px, py, e.deltaY); return; }
+
+  let dx=e.deltaX, dy=e.deltaY;
+  const DOM_DELTA_LINE = typeof WheelEvent!=="undefined" ? WheelEvent.DOM_DELTA_LINE : 1;
+  const DOM_DELTA_PAGE = typeof WheelEvent!=="undefined" ? WheelEvent.DOM_DELTA_PAGE : 2;
+  if (e.deltaMode===DOM_DELTA_LINE){ dx*=32; dy*=32; }
+  else if (e.deltaMode===DOM_DELTA_PAGE){ dx*=surface.clientWidth||1; dy*=surface.clientHeight||1; }
+  renderer.nudgeCamera(-dx * renderer.deviceScaleX, -dy * renderer.deviceScaleY);
+},{ passive:false });
+
+surface.addEventListener("dblclick", (e) => { e.preventDefault(); renderer.resetView(); });
+
+surface.addEventListener("click", (e) => {
+  if (e.detail>1) return;
+  if (panMoved){ panMoved=false; return; }
+  const rect = surface.getBoundingClientRect();
+  const px = (e.clientX - rect.left) * renderer.deviceScaleX;
+  const py = (e.clientY - rect.top)  * renderer.deviceScaleY;
+  const iso = renderer.screenToIso(px, py);
   const unit = renderer.getUnitAt(iso.x, iso.y);
-  const unitId = unit?.id || null;
-  setSelectedUnit(unitId);
-  ui.selectUnit(unitId);
+  const id = unit?.id || null;
+  setSelectedUnit(id);
+  ui.selectUnit(id);
 });
 
+/* ------------------------------- loop ------------------------------ */
 const clock = { last: performance.now() };
-function animate(now) {
-  const delta = (now - clock.last) / 1000;
-  clock.last = now;
-  simulation.update(delta);
-  const logisticsState = simulation.getLogisticsState();
+function animate(now){
+  const dt = (now - clock.last) / 1000; clock.last = now;
+  simulation.update(dt);
+  const logistics = simulation.getLogisticsState();
   const flows = simulation.getFlows();
-  renderer.render(delta, { flows, logistics: logisticsState });
-  ui.update(logisticsState, flows);
-  refreshUnitPulse(now / 1000);
+  renderer.render(dt, { flows, logistics });
+  ui.update(logistics, flows);
+  refreshUnitPulse(now/1000);
   requestAnimationFrame(animate);
 }
 requestAnimationFrame(animate);
-function applyPreset(name, options = {}) {
-  const preset = PRESETS[name];
-  if (!preset) {
-    return;
-  }
-  simulation.setParam("crudeIntake", preset.crude);
-  simulation.setParam("productFocus", preset.focus);
-  simulation.setParam("maintenance", preset.maintenance);
-  simulation.setParam("safety", preset.safety);
-  simulation.setParam("environment", preset.environment);
 
-  if (name === "shutdown") {
-    simulation.triggerEmergencyShutdown();
-  } else {
-    simulation.releaseEmergencyShutdown();
-  }
-
-  ui.refreshControls();
-  updatePresetButtons(name);
-  activePreset = name;
-  if (typeof ui.setModeBadge === "function") {
-    ui.setModeBadge(preset.label);
-  }
-  if (!options.silent) {
-    simulation.pushLog("info", preset.log);
-  }
+/* --------------------------- app helpers (unchanged logic) --------- */
+function applyPreset(name, options = {}){
+  const p = PRESETS[name]; if (!p) return;
+  simulation.setParam("crudeIntake", p.crude);
+  simulation.setParam("productFocus", p.focus);
+  simulation.setParam("maintenance", p.maintenance);
+  simulation.setParam("safety", p.safety);
+  simulation.setParam("environment", p.environment);
+  if (name==="shutdown") simulation.triggerEmergencyShutdown(); else simulation.releaseEmergencyShutdown();
+  ui.refreshControls(); updatePresetButtons(name); activePreset = name;
+  if (typeof ui.setModeBadge === "function") ui.setModeBadge(p.label);
+  if (!options.silent) simulation.pushLog("info", p.log);
 }
+function updatePresetButtons(name){ document.querySelectorAll("[data-preset]").forEach(b => b.classList.toggle("active", !!name && b.dataset.preset===name)); }
+function updateUnitButtons(id){ document.querySelectorAll("[data-unit-target]").forEach(b => b.classList.toggle("active", b.dataset.unitTarget===id)); updateUnitMenuActive(id); }
+function updateScenarioButtons(k){ document.querySelectorAll("[data-scenario]").forEach(b => b.classList.toggle("active", b.dataset.scenario===k)); updateScenarioMenuActive(k); }
 
-function updatePresetButtons(name) {
-  toolbarPresetButtons.forEach((button) => {
-    const isActive = button.dataset.preset === name;
-    button.classList.toggle("active", Boolean(name) && isActive);
-  });
-}
-
-function updateUnitButtons(unitId) {
-  toolbarUnitButtons.forEach((button) => {
-    button.classList.toggle("active", button.dataset.unitTarget === unitId);
-  });
-  updateUnitMenuActive(unitId);
-}
-
-function updateScenarioButtons(key) {
-  toolbarScenarioButtons.forEach((button) => {
-    button.classList.toggle("active", button.dataset.scenario === key);
-  });
-  updateScenarioMenuActive(key);
-}
-
-function initializeMenus() {
-  if (!menuBar) {
-    return;
-  }
-  const menuButtons = menuBar.querySelectorAll(".menu > .menu-item:not(.menu-action)");
-  menuButtons.forEach((button) => {
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const menu = event.currentTarget.closest(".menu");
-      toggleMenu(menu);
-    });
-  });
-
-  menuBar.addEventListener("click", (event) => {
-    const entry = event.target.closest(".menu-entry");
-    if (!entry || !menuBar.contains(entry)) {
-      return;
-    }
-    event.preventDefault();
-    const action = entry.dataset.action;
-    const scenario = entry.dataset.scenario;
-    const unitId = entry.dataset.unit;
-    if (action) {
-      handleMenuAction(action, entry);
-    } else if (scenario) {
-      simulation.applyScenario(scenario);
-      ui.setScenario(scenario);
-      updateScenarioButtons(scenario);
-    } else if (unitId) {
-      setSelectedUnit(unitId);
-      ui.selectUnit(unitId);
-    }
-    closeMenus();
-  });
-
-  document.addEventListener("click", (event) => {
-    if (activeMenu && menuBar && !menuBar.contains(event.target)) {
-      closeMenus();
-    }
-  });
-
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      closeMenus();
-    }
-  });
-
-  if (menuToggle) {
-    menuToggle.addEventListener("click", () => {
-      const running = simulation.toggleRunning();
-      ui.setRunning(running);
-    });
-  }
-
-  if (importInput) {
-    importInput.addEventListener("change", handleSnapshotImport);
-  }
-}
-
-function toggleMenu(menu) {
-  if (!menu) return;
-  const button = menu.querySelector(".menu-item");
-  const isOpen = menu.classList.contains("open");
-  if (isOpen) {
-    menu.classList.remove("open");
-    if (button) {
-      button.setAttribute("aria-expanded", "false");
-    }
-    activeMenu = null;
-  } else {
-    closeMenus();
-    menu.classList.add("open");
-    if (button) {
-      button.setAttribute("aria-expanded", "true");
-    }
-    activeMenu = menu;
-  }
-}
-
-function closeMenus() {
+/* menus */
+function initializeMenus(){
   if (!menuBar) return;
-  menuBar.querySelectorAll(".menu.open").forEach((menu) => {
-    menu.classList.remove("open");
-    const button = menu.querySelector(".menu-item");
-    if (button) {
-      button.setAttribute("aria-expanded", "false");
-    }
+  const menuButtons = menuBar.querySelectorAll(".menu > .menu-item:not(.menu-action)");
+  menuButtons.forEach(btn => btn.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); toggleMenu(e.currentTarget.closest(".menu")); }));
+  menuBar.addEventListener("click", (e) => {
+    const entry = e.target.closest(".menu-entry");
+    if (!entry || !menuBar.contains(entry)) return;
+    e.preventDefault();
+    const action = entry.dataset.action, scenario = entry.dataset.scenario, unitId = entry.dataset.unit;
+    if (action) handleMenuAction(action, entry);
+    else if (scenario) { simulation.applyScenario(scenario); ui.setScenario(scenario); updateScenarioButtons(scenario); }
+    else if (unitId) { setSelectedUnit(unitId); ui.selectUnit(unitId); }
+    closeMenus();
   });
-  activeMenu = null;
+  document.addEventListener("click", (e)=>{ if (activeMenu && menuBar && !menuBar.contains(e.target)) closeMenus(); });
+  document.addEventListener("keydown", (e)=>{ if (e.key==="Escape") closeMenus(); });
+  if (menuToggle) menuToggle.addEventListener("click", ()=>{ const r=simulation.toggleRunning(); ui.setRunning(r); });
+  if (importInput) importInput.addEventListener("change", handleSnapshotImport);
 }
-
-function handleMenuAction(action) {
-  switch (action) {
-    case "session-reset":
-      performSimulationReset();
-      break;
-    case "session-export":
-      exportSnapshot();
-      break;
-    case "session-import":
-      if (importInput) {
-        importInput.click();
-      }
-      break;
-    case "session-speed-slower": {
-      const multiplier = simulation.adjustSpeedMultiplier(-0.25);
-      simulation.pushLog("info", `Time scale set to ${multiplier.toFixed(2)}× baseline.`);
-      break;
-    }
-    case "session-speed-normal": {
-      const multiplier = simulation.setSpeedMultiplier(1);
-      simulation.pushLog("info", `Time scale reset to ${multiplier.toFixed(2)}× baseline.`);
-      break;
-    }
-    case "session-speed-faster": {
-      const multiplier = simulation.adjustSpeedMultiplier(0.25);
-      simulation.pushLog("info", `Time scale increased to ${multiplier.toFixed(2)}× baseline.`);
-      break;
-    }
-    case "session-load-old":
-      loadSessionPreset("legacy");
-      break;
-    case "session-load-new":
-      loadSessionPreset("modern");
-      break;
-    case "view-center":
-      renderer.resetView();
-      simulation.pushLog("info", "Viewport recentered over refinery layout.");
-      break;
-    case "view-toggle-grid": {
-      const nextState = !gridVisible;
-      setGridVisibility(nextState);
-      simulation.pushLog("info", nextState ? "Grid overlay enabled." : "Grid overlay hidden.");
-      break;
-    }
-    case "view-toggle-flow": {
-      const nextState = !flowOverlayVisible;
-      setFlowVisibility(nextState);
-      simulation.pushLog("info", nextState ? "Process flow glow enabled." : "Process flow glow hidden.");
-      break;
-    }
-    case "view-cycle-light":
-      renderer.cyclePalette();
-      simulation.pushLog("info", "Palette cycled — channeling SimFarm and SimCity swatches.");
-      break;
-    default:
-      break;
+function toggleMenu(menu){
+  if (!menu) return;
+  const btn = menu.querySelector(".menu-item");
+  const open = menu.classList.contains("open");
+  if (open){ menu.classList.remove("open"); btn?.setAttribute("aria-expanded","false"); activeMenu=null; }
+  else { closeMenus(); menu.classList.add("open"); btn?.setAttribute("aria-expanded","true"); activeMenu=menu; }
+}
+function closeMenus(){
+  if (!menuBar) return;
+  menuBar.querySelectorAll(".menu.open").forEach(m=>{ m.classList.remove("open"); m.querySelector(".menu-item")?.setAttribute("aria-expanded","false"); });
+  activeMenu=null;
+}
+function handleMenuAction(action){
+  switch(action){
+    case "session-reset": performSimulationReset(); break;
+    case "session-export": exportSnapshot(); break;
+    case "session-import": importInput?.click(); break;
+    case "session-speed-slower": { const m=simulation.adjustSpeedMultiplier(-0.25); simulation.pushLog("info", `Time scale set to ${m.toFixed(2)}× baseline.`); break; }
+    case "session-speed-normal": { const m=simulation.setSpeedMultiplier(1); simulation.pushLog("info", `Time scale reset to ${m.toFixed(2)}× baseline.`); break; }
+    case "session-speed-faster": { const m=simulation.adjustSpeedMultiplier(0.25); simulation.pushLog("info", `Time scale increased to ${m.toFixed(2)}× baseline.`); break; }
+    case "session-load-old":  loadSessionPreset("legacy"); break;
+    case "session-load-new":  loadSessionPreset("modern"); break;
+    case "view-center": renderer.resetView(); simulation.pushLog("info","Viewport recentered over refinery layout."); break;
+    case "view-toggle-grid": { const n=!gridVisible; setGridVisibility(n); simulation.pushLog("info", n?"Grid overlay enabled.":"Grid overlay hidden."); break; }
+    case "view-toggle-flow": { const n=!flowOverlayVisible; setFlowVisibility(n); simulation.pushLog("info", n?"Process flow glow enabled.":"Process flow glow hidden."); break; }
+    case "view-cycle-light":  renderer.cyclePalette(); simulation.pushLog("info","Palette cycled — channeling SimFarm and SimCity swatches."); break;
+    default: break;
   }
 }
+function setGridVisibility(v){ gridVisible=v; renderer.setGridVisible(v); updateToggleButton(gridToggleButton,v,"Hide Grid Overlay","Show Grid Overlay"); }
+function setFlowVisibility(v){ flowOverlayVisible=v; renderer.setFlowVisible(v); updateToggleButton(flowToggleButton,v,"Hide Flow Glow","Show Flow Glow"); }
+function updateToggleButton(btn, vis, hideLabel, showLabel){ if (!btn) return; btn.dataset.state = vis?"on":"off"; btn.textContent = vis?hideLabel:showLabel; }
 
-function updateToggleButton(button, visible, hideLabel, showLabel) {
-  if (!button) return;
-  button.dataset.state = visible ? "on" : "off";
-  button.textContent = visible ? hideLabel : showLabel;
-}
-
-function setGridVisibility(visible) {
-  gridVisible = visible;
-  renderer.setGridVisible(visible);
-  updateToggleButton(gridToggleButton, gridVisible, "Hide Grid Overlay", "Show Grid Overlay");
-}
-
-function setFlowVisibility(visible) {
-  flowOverlayVisible = visible;
-  renderer.setFlowVisible(visible);
-  updateToggleButton(flowToggleButton, flowOverlayVisible, "Hide Flow Glow", "Show Flow Glow");
-}
-
-function performSimulationReset() {
+function performSimulationReset(){
   simulation.reset();
-  applyPreset("auto", { silent: true });
-  activePreset = "auto";
-  updatePresetButtons("auto");
-  updateScenarioButtons(simulation.activeScenarioKey);
-  ui.refreshControls();
-  ui.setScenario(simulation.activeScenarioKey);
-  if (typeof ui.setModeBadge === "function") {
-    ui.setModeBadge("AUTO");
-  }
-  setSelectedUnit(null);
-  ui.selectUnit(null);
-  updateUnitButtons(null);
-  populateUnitMenu();
-  ui.setRunning(true);
+  applyPreset("auto",{silent:true}); activePreset="auto";
+  updatePresetButtons("auto"); updateScenarioButtons(simulation.activeScenarioKey);
+  ui.refreshControls(); ui.setScenario(simulation.activeScenarioKey);
+  if (typeof ui.setModeBadge==="function") ui.setModeBadge("AUTO");
+  setSelectedUnit(null); ui.selectUnit(null); updateUnitButtons(null);
+  populateUnitMenu(); ui.setRunning(true);
 }
 
-function loadSessionPreset(key) {
-  const preset = SESSION_PRESETS[key];
-  if (!preset) {
-    simulation.pushLog("info", "Preset scenario not available yet.");
-    return;
-  }
-
+function loadSessionPreset(key){
+  const p = SESSION_PRESETS[key]; if (!p){ simulation.pushLog("info","Preset scenario not available yet."); return; }
   simulation.reset();
-
-  if (preset.scenario) {
-    simulation.applyScenario(preset.scenario);
+  if (p.scenario) { simulation.applyScenario(p.scenario); }
+  if (p.params){
+    if (typeof p.params.crude === "number") simulation.setParam("crudeIntake", p.params.crude);
+    if (typeof p.params.focus === "number") simulation.setParam("productFocus", p.params.focus);
+    if (typeof p.params.maintenance === "number") simulation.setParam("maintenance", p.params.maintenance);
+    if (typeof p.params.safety === "number") simulation.setParam("safety", p.params.safety);
+    if (typeof p.params.environment === "number") simulation.setParam("environment", p.params.environment);
   }
-
-  if (preset.params) {
-    if (typeof preset.params.crude === "number") {
-      simulation.setParam("crudeIntake", preset.params.crude);
-    }
-    if (typeof preset.params.focus === "number") {
-      simulation.setParam("productFocus", preset.params.focus);
-    }
-    if (typeof preset.params.maintenance === "number") {
-      simulation.setParam("maintenance", preset.params.maintenance);
-    }
-    if (typeof preset.params.safety === "number") {
-      simulation.setParam("safety", preset.params.safety);
-    }
-    if (typeof preset.params.environment === "number") {
-      simulation.setParam("environment", preset.params.environment);
-    }
-  }
-
-  if (typeof preset.timeMinutes === "number") {
-    simulation.timeMinutes = preset.timeMinutes;
-  }
-
-  if (typeof preset.marketStress === "number") {
-    simulation.marketStress = clamp(preset.marketStress, 0, 0.85);
-  }
-
-  if (preset.storageLevels && simulation.storage?.levels) {
-    Object.entries(preset.storageLevels).forEach(([product, level]) => {
-      if (simulation.storage.levels[product] !== undefined) {
-        const capacity = simulation.storage.capacity[product] || level;
-        simulation.storage.levels[product] = clamp(level, 0, capacity);
+  if (typeof p.timeMinutes === "number") simulation.timeMinutes = p.timeMinutes;
+  if (typeof p.marketStress === "number") simulation.marketStress = clamp(p.marketStress, 0, 0.85);
+  if (p.storageLevels && simulation.storage?.levels){
+    Object.entries(p.storageLevels).forEach(([prod, lvl])=>{
+      if (simulation.storage.levels[prod] !== undefined){
+        const cap = simulation.storage.capacity[prod] || lvl;
+        simulation.storage.levels[prod] = clamp(lvl, 0, cap);
       }
     });
   }
-
   simulation.shipments = [];
-  if (Array.isArray(preset.shipments)) {
+  if (Array.isArray(p.shipments)){
     const now = simulation.timeMinutes || 0;
-    simulation.shipments = preset.shipments.map((shipment) => ({
-      id: shipment.id || `preset-${shipment.product}-${Math.random().toString(16).slice(2, 6)}`,
-      product: shipment.product,
-      volume: shipment.volume,
-      window: shipment.window,
-      dueIn: shipment.dueIn ?? shipment.window,
-      status: shipment.status || "pending",
-      createdAt: now,
-      cooldown: shipment.cooldown || 0,
+    simulation.shipments = p.shipments.map(s => ({
+      id: s.id || `preset-${s.product}-${Math.random().toString(16).slice(2,6)}`,
+      product: s.product, volume: s.volume, window: s.window, dueIn: s.dueIn ?? s.window,
+      status: s.status || "pending", createdAt: now, cooldown: s.cooldown || 0
     }));
   }
+  if (p.shipmentStats) simulation.shipmentStats = { total:p.shipmentStats.total??0, onTime:p.shipmentStats.onTime??0, missed:p.shipmentStats.missed??0 };
+  if (typeof p.nextShipmentIn === "number") simulation.nextShipmentIn = p.nextShipmentIn;
 
-  if (preset.shipmentStats) {
-    simulation.shipmentStats = {
-      total: preset.shipmentStats.total ?? 0,
-      onTime: preset.shipmentStats.onTime ?? 0,
-      missed: preset.shipmentStats.missed ?? 0,
-    };
-  }
-
-  if (typeof preset.nextShipmentIn === "number") {
-    simulation.nextShipmentIn = preset.nextShipmentIn;
-  }
-
-  if (Array.isArray(preset.units)) {
-    preset.units.forEach((entry) => {
-      const unit = simulation.unitMap?.[entry.id];
-      if (!unit) {
-        return;
-      }
-      if (typeof entry.integrity === "number") {
-        unit.integrity = clamp(entry.integrity, 0, 1);
-      }
-      if (typeof entry.downtime === "number" && entry.downtime > 0) {
-        unit.downtime = entry.downtime;
-        unit.status = "offline";
-      }
-      if (entry.status) {
-        unit.status = entry.status;
-      }
-    });
-  }
+  if (Array.isArray(p.units)) p.units.forEach(entry=>{
+    const u = simulation.unitMap?.[entry.id]; if (!u) return;
+    if (typeof entry.integrity==="number") u.integrity = clamp(entry.integrity,0,1);
+    if (typeof entry.downtime === "number" && entry.downtime>0){ u.downtime = entry.downtime; u.status="offline"; }
+    if (entry.status) u.status = entry.status;
+  });
 
   simulation.unitOverrides = {};
-  if (preset.unitOverrides) {
-    Object.entries(preset.unitOverrides).forEach(([unitId, override]) => {
-      if (typeof override.throttle === "number") {
-        simulation.setUnitThrottle(unitId, override.throttle, { quiet: true });
-      }
-      if (override.offline) {
-        simulation.setUnitOffline(unitId, true, { quiet: true });
-      }
+  if (p.unitOverrides){
+    Object.entries(p.unitOverrides).forEach(([id,ov])=>{
+      if (typeof ov.throttle==="number") simulation.setUnitThrottle(id, ov.throttle, {quiet:true});
+      if (ov.offline) simulation.setUnitOffline(id,true,{quiet:true});
     });
   }
 
@@ -2663,719 +1013,284 @@ function loadSessionPreset(key) {
   simulation.performanceHistory = [];
   simulation.update(1);
 
-  activePreset = null;
-  updatePresetButtons(null);
-  ui.refreshControls();
-  ui.setScenario(simulation.activeScenarioKey);
-  updateScenarioButtons(simulation.activeScenarioKey);
-  setSelectedUnit(null);
-  ui.selectUnit(null);
-  updateUnitButtons(null);
-  populateUnitMenu();
-  ui.setRunning(simulation.running);
-  if (typeof ui.setModeBadge === "function") {
-    ui.setModeBadge("CUSTOM");
-  }
+  activePreset=null; updatePresetButtons(null); ui.refreshControls();
+  ui.setScenario(simulation.activeScenarioKey); updateScenarioButtons(simulation.activeScenarioKey);
+  setSelectedUnit(null); ui.selectUnit(null); updateUnitButtons(null); populateUnitMenu();
+  ui.setRunning(simulation.running); if (typeof ui.setModeBadge==="function") ui.setModeBadge("CUSTOM");
   updateMenuToggle(simulation.running);
   renderer.resetView?.();
-
-  const message = preset.log || "Session preset loaded.";
-  simulation.pushLog("info", message);
+  simulation.pushLog("info", p.log || "Session preset loaded.");
 }
 
-function exportSnapshot() {
+function exportSnapshot(){
   const snapshot = simulation.createSnapshot();
   const json = JSON.stringify(snapshot, null, 2);
-  const blob = new Blob([json], { type: "application/json" });
+  const blob = new Blob([json], { type:"application/json" });
   const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  anchor.href = url;
-  anchor.download = `simrefinery-${timestamp}.json`;
-  document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
-  URL.revokeObjectURL(url);
-  simulation.pushLog("info", "Snapshot exported for download.");
+  const a = document.createElement("a");
+  a.href = url; a.download = `simrefinery-${new Date().toISOString().replace(/[:.]/g,"-")}.json`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  simulation.pushLog("info","Snapshot exported for download.");
 }
-
-function handleSnapshotImport(event) {
-  const [file] = event.target.files || [];
-  if (!file) {
-    return;
-  }
+function handleSnapshotImport(e){
+  const [file] = e.target.files || []; if (!file) return;
   const reader = new FileReader();
   reader.addEventListener("load", () => {
-    try {
-      const snapshot = JSON.parse(reader.result);
-      simulation.loadSnapshot(snapshot);
-      activePreset = null;
-      updatePresetButtons(null);
-      ui.refreshControls();
-      ui.setScenario(simulation.activeScenarioKey);
-      updateScenarioButtons(simulation.activeScenarioKey);
-      setSelectedUnit(null);
-      ui.selectUnit(null);
-      updateUnitButtons(null);
-      populateUnitMenu();
-      ui.setRunning(simulation.running);
-      if (typeof ui.setModeBadge === "function") {
-        ui.setModeBadge("CUSTOM");
-      }
+    try{
+      const snap = JSON.parse(reader.result);
+      simulation.loadSnapshot(snap);
+      activePreset = null; updatePresetButtons(null); ui.refreshControls();
+      ui.setScenario(simulation.activeScenarioKey); updateScenarioButtons(simulation.activeScenarioKey);
+      setSelectedUnit(null); ui.selectUnit(null); updateUnitButtons(null); populateUnitMenu();
+      ui.setRunning(simulation.running); if (typeof ui.setModeBadge==="function") ui.setModeBadge("CUSTOM");
       updateMenuToggle(simulation.running);
-      simulation.pushLog("info", "Snapshot imported and applied.");
-    } catch (error) {
-      console.error("Snapshot import failed", error);
-      simulation.pushLog("warning", "Snapshot import failed. Verify the file format.");
-    }
+      simulation.pushLog("info","Snapshot imported and applied.");
+    }catch(err){ console.error("Snapshot import failed", err); simulation.pushLog("warning","Snapshot import failed. Verify the file format."); }
   });
-  reader.readAsText(file);
-  event.target.value = "";
+  reader.readAsText(file); e.target.value="";
 }
-function populateScenarioMenu() {
-  if (!scenarioMenu) {
-    return;
-  }
+
+/* scenario + unit menus */
+function populateScenarioMenu(){
+  if (!scenarioMenu) return;
   scenarioMenu.innerHTML = "";
-  const scenarios = simulation.getScenarioList();
-  scenarios.forEach((scenario) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "menu-entry";
-    button.dataset.scenario = scenario.key;
-    button.textContent = scenario.name;
-    button.title = scenario.description;
-    scenarioMenu.appendChild(button);
+  simulation.getScenarioList().forEach(s => {
+    const b = document.createElement("button");
+    b.type="button"; b.className="menu-entry"; b.dataset.scenario=s.key; b.textContent=s.name; b.title=s.description; scenarioMenu.appendChild(b);
   });
   updateScenarioMenuActive(simulation.activeScenarioKey);
 }
-
-function updateScenarioMenuActive(key) {
+function updateScenarioMenuActive(key){
   if (!scenarioMenu) return;
-  scenarioMenu.querySelectorAll(".menu-entry").forEach((entry) => {
-    entry.classList.toggle("active", entry.dataset.scenario === key);
-  });
+  scenarioMenu.querySelectorAll(".menu-entry").forEach(e => e.classList.toggle("active", e.dataset.scenario===key));
 }
-
-function populateUnitMenu() {
-  if (!unitMenu) {
-    return;
-  }
+function populateUnitMenu(){
+  if (!unitMenu) return;
   unitMenu.innerHTML = "";
-  simulation.getUnits().forEach((unit) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "menu-entry";
-    button.dataset.unit = unit.id;
-    button.textContent = unit.name;
-    unitMenu.appendChild(button);
+  simulation.getUnits().forEach(u=>{
+    const b = document.createElement("button");
+    b.type="button"; b.className="menu-entry"; b.dataset.unit=u.id; b.textContent=u.name;
+    unitMenu.appendChild(b);
   });
   updateUnitMenuActive(selectedUnitId);
 }
+function updateUnitMenuActive(id){ if (!unitMenu) return; unitMenu.querySelectorAll(".menu-entry").forEach(e => e.classList.toggle("active", e.dataset.unit===id)); }
 
-function updateUnitMenuActive(unitId) {
-  if (!unitMenu) return;
-  unitMenu.querySelectorAll(".menu-entry").forEach((entry) => {
-    entry.classList.toggle("active", entry.dataset.unit === unitId);
-  });
-}
-
-function buildUnitModeLookup() {
+function buildUnitModeLookup(){
   unitModeLabels.clear();
-  const definitions = simulation.getUnitModeDefinitions?.();
-  if (!Array.isArray(definitions)) {
-    return;
-  }
-  definitions.forEach((definition) => {
-    if (definition?.key && definition?.label) {
-      unitModeLabels.set(definition.key, definition.label);
-    }
-  });
+  const defs = simulation.getUnitModeDefinitions?.(); if (!Array.isArray(defs)) return;
+  defs.forEach(d => { if (d?.key && d?.label) unitModeLabels.set(d.key, d.label); });
 }
-
-function initializeUnitPulseList() {
-  if (!unitPulseList) {
-    unitPulseEntries.clear();
-    return;
-  }
+function initializeUnitPulseList(){
+  if (!unitPulseList){ unitPulseEntries.clear(); return; }
   buildUnitModeLookup();
-  unitPulseList.innerHTML = "";
-  unitPulseEntries.clear();
-  simulation.getUnits().forEach((unit) => {
-    const item = document.createElement("li");
-    item.className = "pulse-entry";
-    item.dataset.unit = unit.id;
-
-    const topRow = document.createElement("div");
-    topRow.className = "pulse-top";
-
-    const name = document.createElement("span");
-    name.className = "pulse-name";
-    name.textContent = unit.name;
-    topRow.appendChild(name);
-
-    const mode = document.createElement("span");
-    mode.className = "pulse-mode";
-    mode.dataset.mode = unit.mode;
-    mode.textContent = formatModeLabel(unit.mode);
-    topRow.appendChild(mode);
-
-    item.appendChild(topRow);
-
-    const loadMeter = createPulseMeter("Load", "load");
-    const integrityMeter = createPulseMeter("Integrity", "integrity");
-    item.appendChild(loadMeter.wrapper);
-    item.appendChild(integrityMeter.wrapper);
-
-    const footer = document.createElement("div");
-    footer.className = "pulse-footer";
-
-    const status = document.createElement("span");
-    status.className = "pulse-status";
-    footer.appendChild(status);
-
-    const incidents = document.createElement("span");
-    incidents.className = "pulse-incidents";
-    footer.appendChild(incidents);
-
+  unitPulseList.innerHTML = ""; unitPulseEntries.clear();
+  simulation.getUnits().forEach(u=>{
+    const item = document.createElement("li"); item.className="pulse-entry"; item.dataset.unit=u.id;
+    const top = document.createElement("div"); top.className="pulse-top";
+    const name = document.createElement("span"); name.className="pulse-name"; name.textContent=u.name; top.appendChild(name);
+    const mode = document.createElement("span"); mode.className="pulse-mode"; mode.dataset.mode=u.mode; mode.textContent=formatModeLabel(u.mode); top.appendChild(mode);
+    item.appendChild(top);
+    const loadMeter = createPulseMeter("Load","load"); const integMeter = createPulseMeter("Integrity","integrity");
+    item.appendChild(loadMeter.wrapper); item.appendChild(integMeter.wrapper);
+    const footer = document.createElement("div"); footer.className="pulse-footer";
+    const status = document.createElement("span"); status.className="pulse-status"; footer.appendChild(status);
+    const incidents = document.createElement("span"); incidents.className="pulse-incidents"; footer.appendChild(incidents);
     item.appendChild(footer);
-
-    item.addEventListener("click", () => {
-      setSelectedUnit(unit.id);
-      ui.selectUnit(unit.id);
-    });
-
+    item.addEventListener("click", ()=>{ setSelectedUnit(u.id); ui.selectUnit(u.id); });
     unitPulseList.appendChild(item);
-
-    unitPulseEntries.set(unit.id, {
-      item,
-      mode,
-      status,
-      incidents,
-      loadFill: loadMeter.fill,
-      loadValue: loadMeter.value,
-      integrityFill: integrityMeter.fill,
-      integrityValue: integrityMeter.value,
+    unitPulseEntries.set(u.id, {
+      item, mode, status, incidents,
+      loadFill: loadMeter.fill, loadValue: loadMeter.value,
+      integrityFill: integMeter.fill, integrityValue: integMeter.value
     });
   });
-
-  refreshUnitPulse(0, true);
+  refreshUnitPulse(0,true);
 }
-
-function createPulseMeter(label, type) {
-  const wrapper = document.createElement("div");
-  wrapper.className = "pulse-meter";
-  wrapper.dataset.type = type;
-  const labelEl = document.createElement("span");
-  labelEl.className = "pulse-meter-label";
-  labelEl.textContent = label;
-  const track = document.createElement("span");
-  track.className = "pulse-meter-track";
-  const fill = document.createElement("span");
-  fill.className = "pulse-meter-fill";
-  track.appendChild(fill);
-  const value = document.createElement("span");
-  value.className = "pulse-meter-value";
-  wrapper.append(labelEl, track, value);
-  return { wrapper, fill, value };
+function createPulseMeter(label,type){
+  const wrapper = document.createElement("div"); wrapper.className="pulse-meter"; wrapper.dataset.type=type;
+  const labelEl = document.createElement("span"); labelEl.className="pulse-meter-label"; labelEl.textContent=label;
+  const track = document.createElement("span"); track.className="pulse-meter-track";
+  const fill  = document.createElement("span"); fill.className="pulse-meter-fill"; track.appendChild(fill);
+  const value = document.createElement("span"); value.className="pulse-meter-value";
+  wrapper.append(labelEl, track, value); return { wrapper, fill, value };
 }
-
-function refreshUnitPulse(time, force = false) {
-  if (!unitPulseList || unitPulseEntries.size === 0) {
-    return;
-  }
-  if (!force && time - lastPulseRefresh < 0.45) {
-    return;
-  }
+function refreshUnitPulse(time, force=false){
+  if (!unitPulseList || unitPulseEntries.size===0) return;
+  if (!force && time - lastPulseRefresh < 0.45) return;
   lastPulseRefresh = time;
-
-  simulation.getUnits().forEach((unit) => {
-    const entry = unitPulseEntries.get(unit.id);
-    if (!entry) return;
-    const utilization = clamp(unit.utilization ?? 0, 0, 1.4);
-    const normalizedLoad = Math.min(utilization, 1);
-    entry.loadFill.style.width = `${(normalizedLoad * 100).toFixed(1)}%`;
-    entry.loadFill.style.background = getLoadGradient(normalizedLoad, utilization > 1);
-    entry.loadValue.textContent = `${Math.round(utilization * 100)}%`;
-    const integrity = clamp(unit.integrity ?? 0, 0, 1);
-    entry.integrityFill.style.width = `${(integrity * 100).toFixed(1)}%`;
-    entry.integrityFill.style.background = getIntegrityGradient(integrity);
-    entry.integrityValue.textContent = `${Math.round(integrity * 100)}%`;
-    entry.mode.textContent = formatModeLabel(unit.mode);
-    entry.mode.dataset.mode = unit.mode || "balanced";
-    entry.status.textContent = formatUnitStatus(unit);
-    entry.incidents.textContent = formatIncidentCount(unit.incidents || 0);
-    entry.item.classList.toggle("offline", unit.status === "offline");
-    entry.item.classList.toggle("standby", unit.status === "standby");
-    entry.item.classList.toggle("overload", utilization > 1);
-    entry.item.classList.toggle("selected", selectedUnitId === unit.id);
-    entry.item.classList.toggle("alerting", Boolean(unit.alert));
+  simulation.getUnits().forEach(u=>{
+    const e = unitPulseEntries.get(u.id); if (!e) return;
+    const util = clamp(u.utilization ?? 0, 0, 1.4); const n = Math.min(util,1);
+    e.loadFill.style.width = `${(n*100).toFixed(1)}%`;
+    e.loadValue.textContent = `${Math.round(util*100)}%`;
+    const integ = clamp(u.integrity ?? 0, 0, 1);
+    e.integrityFill.style.width = `${(integ*100).toFixed(1)}%`;
+    e.integrityValue.textContent = `${Math.round(integ*100)}%`;
+    e.mode.textContent = formatModeLabel(u.mode); e.mode.dataset.mode = u.mode || "balanced";
+    e.status.textContent = formatUnitStatus(u);
+    e.incidents.textContent = formatIncidentCount(u.incidents||0);
+    e.item.classList.toggle("offline", u.status==="offline");
+    e.item.classList.toggle("standby", u.status==="standby");
+    e.item.classList.toggle("overload", util>1);
+    e.item.classList.toggle("selected", selectedUnitId===u.id);
+    e.item.classList.toggle("alerting", !!u.alert);
   });
-
   renderAlertCallouts();
 }
-function renderAlertCallouts() {
-  if (!calloutShelf) {
-    return;
-  }
+
+/* alerts + legend (unchanged) */
+function renderAlertCallouts(){
+  if (!calloutShelf) return;
   const alerts = collectActiveAlerts();
-  const signatureParts = [selectedUnitId || "none"];
-  alerts.forEach((alert) => {
-    signatureParts.push(
-      `${alert.type || "unit"}:${alert.unitId || alert.product || alert.label || ""}:${alert.severity || ""}:${
-        alert.summary || ""
-      }:${alert.detail || ""}:${alert.guidance || ""}`
-    );
+  const sig = [selectedUnitId || "none"].concat(alerts.map(a => `${a.type||"unit"}:${a.unitId||a.product||a.label||""}:${a.severity||""}:${a.summary||""}:${a.detail||""}:${a.guidance||""}`)).join("|");
+  if (calloutShelf.dataset.signature === sig) return;
+  calloutShelf.dataset.signature = sig; calloutShelf.innerHTML = "";
+  if (alerts.length===0){
+    calloutShelf.dataset.state="clear";
+    const p=document.createElement("p"); p.className="alert-empty"; p.textContent="All systems nominal."; calloutShelf.appendChild(p); return;
+  }
+  calloutShelf.dataset.state="active";
+  const rank = { danger:0, warning:1, info:2 };
+  alerts.slice().sort((a,b)=> (rank[a.severity]??3)-(rank[b.severity]??3) || (b.recordedAt||"").localeCompare(a.recordedAt||"")).forEach(alert=>{
+    calloutShelf.appendChild(createAlertCallout(alert));
   });
-  const signature = signatureParts.join("|");
-  if (calloutShelf.dataset.signature === signature) {
-    return;
-  }
-  calloutShelf.dataset.signature = signature;
-
-  calloutShelf.innerHTML = "";
-  if (alerts.length === 0) {
-    calloutShelf.dataset.state = "clear";
-    const empty = document.createElement("p");
-    empty.className = "alert-empty";
-    empty.textContent = "All systems nominal.";
-    calloutShelf.appendChild(empty);
-    return;
-  }
-
-  calloutShelf.dataset.state = "active";
-  const severityRank = { danger: 0, warning: 1, info: 2 };
-  alerts
-    .slice()
-    .sort((a, b) => {
-      const rankA = severityRank[a.severity] ?? 3;
-      const rankB = severityRank[b.severity] ?? 3;
-      if (rankA !== rankB) {
-        return rankA - rankB;
-      }
-      const timeA = a.recordedAt || "";
-      const timeB = b.recordedAt || "";
-      return timeB.localeCompare(timeA);
-    })
-    .forEach((alert) => {
-      calloutShelf.appendChild(createAlertCallout(alert));
-    });
 }
-
-function collectActiveAlerts() {
-  if (typeof simulation.getActiveAlerts === "function") {
-    const provided = simulation.getActiveAlerts();
-    if (Array.isArray(provided)) {
-      return provided.map((alert) => ({
-        type: alert.type || "unit",
-        unitId: alert.unitId || null,
-        product: alert.product,
-        label: alert.label || alert.name || null,
-        name: alert.name || alert.label || null,
-        severity: alert.severity || "warning",
-        summary: alert.summary || alert.title || "",
-        detail: alert.detail || alert.cause || "",
-        guidance: alert.guidance || "",
-        recordedAt: alert.recordedAt || alert.time || "",
-        percent:
-          typeof alert.percent === "number"
-            ? alert.percent
-            : typeof alert.utilization === "number"
-            ? alert.utilization
-            : undefined,
-      }));
-    }
+function collectActiveAlerts(){
+  if (typeof simulation.getActiveAlerts==="function"){
+    const arr = simulation.getActiveAlerts();
+    if (Array.isArray(arr)) return arr.map(a=>({ type:a.type||"unit", unitId:a.unitId||null, product:a.product, label:a.label||a.name||null, name:a.name||a.label||null, severity:a.severity||"warning", summary:a.summary||a.title||"", detail:a.detail||a.cause||"", guidance:a.guidance||"", recordedAt:a.recordedAt||a.time||"", percent: typeof a.percent==="number" ? a.percent : (typeof a.utilization==="number"?a.utilization:undefined) }));
   }
-
-  return simulation
-    .getUnits()
-    .filter((unit) => Boolean(unit.alert))
-    .map((unit) => {
-      const detail = unit.alertDetail || unit.lastIncident || {};
-      return {
-        type: "unit",
-        unitId: unit.id,
-        label: unit.name,
-        name: unit.name,
-        severity: detail.severity || unit.alert || "warning",
-        summary: detail.summary || buildUnitAlertSummary(unit),
-        detail: detail.cause || buildUnitAlertDescription(unit),
-        guidance: detail.guidance || "",
-        recordedAt: detail.recordedAt || "",
-      };
-    });
+  return simulation.getUnits().filter(u=>!!u.alert).map(u=>{
+    const d=u.alertDetail||u.lastIncident||{};
+    return { type:"unit", unitId:u.id, label:u.name, name:u.name, severity:d.severity||u.alert||"warning", summary:d.summary||buildUnitAlertSummary(u), detail:d.cause||buildUnitAlertDescription(u), guidance:d.guidance||"", recordedAt:d.recordedAt||"" };
+  });
 }
-
-function createAlertCallout(alert) {
-  const card = document.createElement("article");
-  card.className = "alert-callout";
-  card.dataset.severity = alert.severity || "warning";
-  const heading = document.createElement("header");
-  const title = document.createElement("h4");
-  title.textContent = alert.label || alert.name || "Alert";
-  heading.appendChild(title);
-
-  if (alert.severity) {
-    const badge = document.createElement("span");
-    badge.className = "alert-badge";
-    badge.textContent = alert.severity.toUpperCase();
-    heading.appendChild(badge);
+function createAlertCallout(alert){
+  const card=document.createElement("article"); card.className="alert-callout"; card.dataset.severity=alert.severity||"warning";
+  const header=document.createElement("header"); const h=document.createElement("h4"); h.textContent=alert.label||alert.name||"Alert"; header.appendChild(h);
+  if (alert.severity){ const b=document.createElement("span"); b.className="alert-badge"; b.textContent=alert.severity.toUpperCase(); header.appendChild(b); }
+  card.appendChild(header);
+  if (alert.summary){ const p=document.createElement("p"); p.className="alert-summary"; p.textContent=alert.summary; card.appendChild(p); }
+  if (alert.detail){ const p=document.createElement("p"); p.className="alert-detail"; p.textContent=alert.detail; card.appendChild(p); }
+  if (alert.guidance){ const p=document.createElement("p"); p.className="alert-guidance"; p.textContent=alert.guidance; card.appendChild(p); }
+  const footer=document.createElement("footer"); const ts=document.createElement("span"); ts.textContent = alert.recordedAt?`Since ${alert.recordedAt}`:"Live update"; footer.appendChild(ts);
+  if (alert.unitId){
+    const btn=document.createElement("button"); btn.type="button"; btn.className="alert-focus-button"; btn.textContent="Focus";
+    const focusUnit=()=>{ setSelectedUnit(alert.unitId); ui.selectUnit(alert.unitId); };
+    btn.addEventListener("click",focusUnit);
+    btn.addEventListener("focus",()=>highlightPipelinesForUnit(alert.unitId));
+    btn.addEventListener("blur",()=>{ if (selectedUnitId) highlightPipelinesForUnit(selectedUnitId); else clearPipelineHighlight(); });
+    footer.appendChild(btn);
+    const highlight=()=>highlightPipelinesForUnit(alert.unitId);
+    const reset=()=>{ if (selectedUnitId) highlightPipelinesForUnit(selectedUnitId); else clearPipelineHighlight(); };
+    card.addEventListener("mouseenter",highlight); card.addEventListener("focus",highlight);
+    card.addEventListener("mouseleave",reset);     card.addEventListener("blur",reset);
+    card.addEventListener("keydown",(e)=>{ if (e.key==="Enter"||e.key===" "){ e.preventDefault(); focusUnit(); }});
+  } else if (alert.type==="storage"){
+    const s=document.createElement("span"); s.textContent = typeof alert.percent==="number" ? `${Math.round(alert.percent)}% full` : "Storage alert"; footer.appendChild(s);
   }
-
-  card.appendChild(heading);
-
-  if (alert.summary) {
-    const summary = document.createElement("p");
-    summary.className = "alert-summary";
-    summary.textContent = alert.summary;
-    card.appendChild(summary);
-  }
-
-  if (alert.detail) {
-    const detail = document.createElement("p");
-    detail.className = "alert-detail";
-    detail.textContent = alert.detail;
-    card.appendChild(detail);
-  }
-
-  if (alert.guidance) {
-    const guidance = document.createElement("p");
-    guidance.className = "alert-guidance";
-    guidance.textContent = alert.guidance;
-    card.appendChild(guidance);
-  }
-
-  const footer = document.createElement("footer");
-  const timestamp = document.createElement("span");
-  timestamp.textContent = alert.recordedAt ? `Since ${alert.recordedAt}` : "Live update";
-  footer.appendChild(timestamp);
-
-  if (alert.unitId) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "alert-focus-button";
-    button.textContent = "Focus";
-    const focusUnit = () => {
-      setSelectedUnit(alert.unitId);
-      ui.selectUnit(alert.unitId);
-    };
-    button.addEventListener("click", focusUnit);
-    button.addEventListener("focus", () => highlightPipelinesForUnit(alert.unitId));
-    button.addEventListener("blur", () => {
-      if (selectedUnitId) {
-        highlightPipelinesForUnit(selectedUnitId);
-      } else {
-        clearPipelineHighlight();
-      }
-    });
-    footer.appendChild(button);
-
-    const highlight = () => highlightPipelinesForUnit(alert.unitId);
-    const resetHighlight = () => {
-      if (selectedUnitId) {
-        highlightPipelinesForUnit(selectedUnitId);
-      } else {
-        clearPipelineHighlight();
-      }
-    };
-    card.addEventListener("mouseenter", highlight);
-    card.addEventListener("focus", highlight);
-    card.addEventListener("mouseleave", resetHighlight);
-    card.addEventListener("blur", resetHighlight);
-    card.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        focusUnit();
-      }
-    });
-  } else if (alert.type === "storage") {
-    const status = document.createElement("span");
-    if (typeof alert.percent === "number") {
-      status.textContent = `${Math.round(alert.percent)}% full`;
-    } else {
-      status.textContent = "Storage alert";
-    }
-    footer.appendChild(status);
-  }
-
   card.appendChild(footer);
-
-  if (alert.unitId && selectedUnitId === alert.unitId) {
-    card.classList.add("selected");
-  }
-
+  if (alert.unitId && selectedUnitId===alert.unitId) card.classList.add("selected");
   return card;
 }
 
-function getLoadGradient(value, overload) {
-  if (overload) {
-    return "linear-gradient(90deg, #ff7a5c, #ff3624)";
-  }
-  const clamped = clamp(value, 0, 1);
-  const hue = 210 - clamped * 170;
-  const hueEnd = Math.max(15, hue - 14);
-  return `linear-gradient(90deg, hsl(${hue}, 78%, 55%), hsl(${hueEnd}, 78%, 48%))`;
-}
-
-function getIntegrityGradient(value) {
-  const clamped = clamp(value, 0, 1);
-  const hue = 20 + clamped * 100;
-  const hueEnd = Math.min(130, hue + 8);
-  return `linear-gradient(90deg, hsl(${hue}, 72%, 52%), hsl(${hueEnd}, 68%, 46%))`;
-}
-
-function buildUnitAlertSummary(unit) {
-  const detail = unit.alertDetail || unit.lastIncident;
-  if (detail?.summary) {
-    return detail.summary;
-  }
-  if (unit.status === "offline") {
-    if (unit.emergencyOffline) {
-      return "Emergency shutdown";
-    }
-    if (unit.manualOffline) {
-      return "Manual standby";
-    }
-    return "Offline for repairs";
-  }
-  if (typeof unit.integrity === "number" && unit.integrity < 0.5) {
-    return `Integrity ${Math.round(unit.integrity * 100)}%`;
-  }
-  if (unit.alert === "danger") {
-    return "Critical fault";
-  }
-  if (unit.alert === "warning") {
-    return "Process warning";
-  }
-  return "Stable";
-}
-
-function buildUnitAlertDescription(unit) {
-  const detail = unit.alertDetail || unit.lastIncident;
-  if (detail?.cause && detail?.guidance) {
-    return `${detail.cause}. ${detail.guidance}`;
-  }
-  if (detail?.cause) {
-    return detail.cause;
-  }
-  if (detail?.guidance) {
-    return detail.guidance;
-  }
-  if (unit.alert === "danger") {
-    return "Immediate intervention required.";
-  }
-  if (unit.alert === "warning") {
-    if (typeof unit.integrity === "number") {
-      return `Integrity at ${Math.round(unit.integrity * 100)}%. Adjust maintenance or throughput.`;
-    }
-    return "Monitor unit conditions closely.";
-  }
-  return "Online";
-}
-function formatUnitStatus(unit) {
-  if (unit.status === "offline") {
-    return formatOfflineStatus(unit);
-  }
-  if (unit.alert) {
-    return buildUnitAlertSummary(unit);
-  }
-  if (typeof unit.utilization === "number") {
-    return `Online • ${Math.round(unit.utilization * 100)}% load`;
-  }
-  return "Online";
-}
-
-function formatOfflineStatus(unit) {
-  const minutes = Math.max(1, Math.ceil(unit.downtime || 0));
-  if (unit.alert) {
-    return `${buildUnitAlertSummary(unit)} (${minutes}m)`;
-  }
-  return `Offline (${minutes}m)`;
-}
-
-function formatIncidentCount(count) {
-  return count === 1 ? "1 incident" : `${count} incidents`;
-}
-
-function formatModeLabel(key) {
-  if (!key) {
-    return "Balanced";
-  }
-  if (unitModeLabels.has(key)) {
-    return unitModeLabels.get(key);
-  }
-  return key
-    .split(/\s|_/)
-    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(" ");
-}
-
-function updateMenuToggle(running) {
-  if (!menuToggle) return;
-  menuToggle.textContent = running ? "Pause" : "Resume";
-  menuToggle.setAttribute("aria-pressed", running ? "false" : "true");
-}
-
-function buildProcessLegend() {
-  if (!mapStatusPanel || !processTopology) {
-    return;
-  }
-  if (mapStatusPanel.querySelector("#process-legend")) {
-    return;
-  }
-  const legend = document.createElement("div");
-  legend.id = "process-legend";
-  const heading = document.createElement("h4");
-  heading.textContent = "Process Flow";
-  legend.appendChild(heading);
+/* legend */
+function buildProcessLegend(){
+  if (!mapStatusPanel || !processTopology) return;
+  if (mapStatusPanel.querySelector("#process-legend")) return;
+  const legend = document.createElement("div"); legend.id="process-legend";
+  const h = document.createElement("h4"); h.textContent = "Process Flow"; legend.appendChild(h);
   const list = document.createElement("ol");
-  const sequence = ["distillation", "reformer", "fcc", "hydrocracker", "alkylation", "sulfur"];
-  sequence.forEach((unitId) => {
-    const entry = processTopology[unitId];
-    if (!entry) {
-      return;
-    }
-    const item = document.createElement("li");
-    item.dataset.unit = unitId;
-    item.setAttribute("role", "button");
-    item.tabIndex = 0;
-    const name = document.createElement("span");
-    name.textContent = entry.name || unitId;
-    item.appendChild(name);
-    const summary = document.createElement("small");
-    summary.textContent = entry.summary || "";
-    item.appendChild(summary);
-    item.addEventListener("mouseenter", () => highlightPipelinesForUnit(unitId));
-    item.addEventListener("focus", () => highlightPipelinesForUnit(unitId));
-    item.addEventListener("mouseleave", () => {
-      if (selectedUnitId) {
-        highlightPipelinesForUnit(selectedUnitId);
-      } else {
-        clearPipelineHighlight();
-      }
-    });
-    item.addEventListener("blur", () => {
-      if (selectedUnitId) {
-        highlightPipelinesForUnit(selectedUnitId);
-      } else {
-        clearPipelineHighlight();
-      }
-    });
-    item.addEventListener("click", () => {
-      setSelectedUnit(unitId);
-      ui.selectUnit(unitId);
-    });
-    item.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        setSelectedUnit(unitId);
-        ui.selectUnit(unitId);
-      }
-    });
+  const sequence = ["distillation","reformer","fcc","hydrocracker","alkylation","sulfur"];
+  sequence.forEach(id => {
+    const entry = processTopology[id]; if (!entry) return;
+    const item = document.createElement("li"); item.dataset.unit=id; item.setAttribute("role","button"); item.tabIndex=0;
+    const name=document.createElement("span"); name.textContent = entry.name || id; item.appendChild(name);
+    const summary=document.createElement("small"); summary.textContent = entry.summary || ""; item.appendChild(summary);
+    item.addEventListener("mouseenter",()=>highlightPipelinesForUnit(id));
+    item.addEventListener("focus",()=>highlightPipelinesForUnit(id));
+    const reset=()=>{ if (selectedUnitId) highlightPipelinesForUnit(selectedUnitId); else clearPipelineHighlight(); };
+    item.addEventListener("mouseleave",reset); item.addEventListener("blur",reset);
+    item.addEventListener("click",()=>{ setSelectedUnit(id); ui.selectUnit(id); });
+    item.addEventListener("keydown",(e)=>{ if (e.key==="Enter"||e.key===" "){ e.preventDefault(); setSelectedUnit(id); ui.selectUnit(id); }});
     list.appendChild(item);
   });
   legend.appendChild(list);
   mapStatusPanel.appendChild(legend);
 }
 
-function highlightPipelinesForUnit(unitId) {
-  if (!unitId) {
-    clearPipelineHighlight();
-    return;
-  }
-  const pipelines = unitConnectionIndex.get(unitId) || [];
-  renderer.setHighlightedPipelines(pipelines);
+/* highlighting / selection */
+function highlightPipelinesForUnit(id){
+  if (!id){ clearPipelineHighlight(); return; }
+  const list = unitConnectionIndex.get(id) || [];
+  renderer.setHighlightedPipelines(list);
 }
-
-function clearPipelineHighlight() {
-  renderer.setHighlightedPipelines([]);
-}
-
-function setSelectedUnit(unitId) {
-  selectedUnitId = unitId || null;
+function clearPipelineHighlight(){ renderer.setHighlightedPipelines([]); }
+function setSelectedUnit(id){
+  selectedUnitId = id || null;
   renderer.setSelectedUnit(selectedUnitId);
   updateUnitButtons(selectedUnitId);
-  if (selectedUnitId) {
-    highlightPipelinesForUnit(selectedUnitId);
-  } else {
-    clearPipelineHighlight();
-  }
+  if (selectedUnitId) highlightPipelinesForUnit(selectedUnitId); else clearPipelineHighlight();
 }
 
-function handleToolbarCommand(command) {
-  switch (command) {
-    case "record-demo":
-      simulation.pushLog(
-        "info",
-        "Whiteboard recorder placeholder: review the included tutorial playback for orientation."
-      );
-      break;
-    case "inspection":
-      simulation.pushLog(
-        "info",
-        "Inspection window is mostly blank in the original prototype — guidance comes from the Tour Book."
-      );
-      break;
-    case "build-road":
-      simulation.dispatchLogisticsConvoy();
-      break;
-    case "build-pipe": {
-      const success = simulation.deployPipelineBypass(selectedUnitId);
-      if (success && selectedUnitId) {
-        highlightPipelinesForUnit(selectedUnitId);
-      }
-      break;
-    }
-    case "bulldoze":
-      simulation.scheduleTurnaround(selectedUnitId);
-      break;
-    default:
-      break;
-  }
-}
-
-function renderPrototypeNotes() {
-  if (!prototypeNotes) {
-    return;
-  }
+/* prototype notes (unchanged text) */
+function renderPrototypeNotes(){
+  if (!prototypeNotes) return;
   prototypeNotes.innerHTML = "";
   const history = document.createElement("p");
-  history.textContent =
-    "Recovered Richmond interface now wires convoy drills, pipeline bypasses, and scenario loads directly into the edit console.";
-  const placeholders = document.createElement("ul");
-  placeholders.className = "prototype-list";
+  history.textContent = "Recovered Richmond interface now wires convoy drills, pipeline bypasses, and scenario loads directly into the edit console.";
+  const ul = document.createElement("ul"); ul.className="prototype-list";
   [
     "Session → Load Old/New drop you into curated Chevron training scenarios with different bottlenecks to solve.",
     "ROAD dispatches a truck convoy to bleed down whichever product tanks are overflowing the most.",
     "PIPE stages a temporary bypass for the selected unit’s feed, while BULLDOZE schedules a turnaround to restore integrity.",
-    "Drag the refinery map to pan and use the mouse wheel to zoom in on the SimCity-style detail work.",
-  ].forEach((line) => {
-    const item = document.createElement("li");
-    item.textContent = line;
-    placeholders.appendChild(item);
-  });
-  prototypeNotes.append(history, placeholders);
+    "Drag the refinery map to pan and use the mouse wheel to zoom in on the SimCity-style detail work."
+  ].forEach(s=>{ const li=document.createElement("li"); li.textContent=s; ul.appendChild(li); });
+  prototypeNotes.append(history, ul);
 }
 
-function buildUnitConnectionIndex(topology) {
-  const map = new Map();
-  if (!topology) {
-    return map;
+/* little formatters (unchanged) */
+function buildUnitAlertSummary(u){
+  const d=u.alertDetail||u.lastIncident;
+  if (d?.summary) return d.summary;
+  if (u.status==="offline"){
+    if (u.emergencyOffline) return "Emergency shutdown";
+    if (u.manualOffline) return "Manual standby";
+    return "Offline for repairs";
   }
-  Object.entries(topology).forEach(([unitId, entry]) => {
-    const pipelines = new Set();
-    (entry.feeds || []).forEach((item) => {
-      if (item && item.pipeline) {
-        pipelines.add(item.pipeline);
-      }
-    });
-    (entry.outputs || []).forEach((item) => {
-      if (item && item.pipeline) {
-        pipelines.add(item.pipeline);
-      }
-    });
-    map.set(unitId, Array.from(pipelines));
-  });
-  return map;
+  if (typeof u.integrity==="number" && u.integrity<0.5) return `Integrity ${Math.round(u.integrity*100)}%`;
+  if (u.alert==="danger") return "Critical fault";
+  if (u.alert==="warning") return "Process warning";
+  return "Stable";
 }
-
+function buildUnitAlertDescription(u){
+  const d=u.alertDetail||u.lastIncident;
+  if (d?.cause && d?.guidance) return `${d.cause}. ${d.guidance}`;
+  if (d?.cause) return d.cause;
+  if (d?.guidance) return d.guidance;
+  if (u.alert==="danger") return "Immediate intervention required.";
+  if (u.alert==="warning"){
+    if (typeof u.integrity==="number") return `Integrity at ${Math.round(u.integrity*100)}%. Adjust maintenance or throughput.`;
+    return "Monitor unit conditions closely.";
+  }
+  return "Online";
+}
+function formatUnitStatus(u){
+  if (u.status==="offline") return formatOfflineStatus(u);
+  if (u.alert) return buildUnitAlertSummary(u);
+  if (typeof u.utilization==="number") return `Online • ${Math.round(u.utilization*100)}% load`;
+  return "Online";
+}
+function formatOfflineStatus(u){
+  const m = Math.max(1, Math.ceil(u.downtime||0));
+  if (u.alert) return `${buildUnitAlertSummary(u)} (${m}m)`;
+  return `Offline (${m}m)`;
+}
+function formatIncidentCount(n){ return n===1 ? "1 incident" : `${n} incidents`; }
+function formatModeLabel(k){
+  if (!k) return "Balanced";
+  if (unitModeLabels.has(k)) return unitModeLabels.get(k);
+  return k.split(/\s|_/).map(s => s.charAt(0).toUpperCase()+s.slice(1)).join(" ");
+}
+function updateMenuToggle(running){ if (!menuToggle) return; menuToggle.textContent = running ? "Pause" : "Resume"; menuToggle.setAttribute("aria-pressed", running ? "false":"true"); }
