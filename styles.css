@@ -232,6 +232,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
 }
 
 .map-toolbar {
@@ -308,6 +309,7 @@ body {
   user-select: none;
   touch-action: none;
   overflow: hidden;
+  min-width: 0;
 }
 
 #map-viewport.panning {
@@ -1321,6 +1323,87 @@ body {
 
 .metric-wide.scorecard {
   gap: 10px;
+}
+
+.metric-economy {
+  gap: 12px;
+}
+
+.economy-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.economy-header h3 {
+  margin: 0;
+}
+
+.economy-header p {
+  margin: 0;
+  font-size: 0.7rem;
+  color: #33445c;
+  line-height: 1.3;
+}
+
+.economy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.economy-card {
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 3px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.economy-card h4 {
+  margin: 0;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #1b2a3f;
+}
+
+.economy-card dl {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.economy-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.economy-row dt {
+  margin: 0;
+  font-size: 0.62rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #505050;
+}
+
+.economy-row dd {
+  margin: 0;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: #0b2447;
+}
+
+.economy-basis.positive {
+  color: #2f7f4f;
+}
+
+.economy-basis.negative {
+  color: #8a1e1e;
 }
 
 .scorecard-header {

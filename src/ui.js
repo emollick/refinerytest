@@ -41,6 +41,15 @@ export class UIController {
       marginOutput: document.getElementById("margin-output"),
       reliabilityOutput: document.getElementById("reliability-output"),
       carbonOutput: document.getElementById("carbon-output"),
+      gasolineFutures: document.getElementById("gasoline-futures"),
+      dieselFutures: document.getElementById("diesel-futures"),
+      jetFutures: document.getElementById("jet-futures"),
+      gasolineCost: document.getElementById("gasoline-cost"),
+      dieselCost: document.getElementById("diesel-cost"),
+      jetCost: document.getElementById("jet-cost"),
+      gasolineBasis: document.getElementById("gasoline-basis"),
+      dieselBasis: document.getElementById("diesel-basis"),
+      jetBasis: document.getElementById("jet-basis"),
       scoreGrade: document.getElementById("score-grade"),
       scoreDelta: document.getElementById("score-delta"),
       scoreNote: document.getElementById("score-note"),
@@ -64,6 +73,12 @@ export class UIController {
       style: "currency",
       currency: "USD",
       maximumFractionDigits: 0,
+    });
+    this.priceFormatter = new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
     });
     this.flowFormatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
 
@@ -325,7 +340,92 @@ export class UIController {
     this.elements.reliabilityOutput.textContent = `${Math.round(metrics.reliability * 100)}%`;
     this.elements.carbonOutput.textContent = `${metrics.carbon.toFixed(1)} tCO₂-eq`;
 
+    this._renderEconomy(metrics);
     this._renderScorecard(metrics);
+  }
+
+  _renderEconomy(metrics) {
+    if (!this.priceFormatter) {
+      return;
+    }
+    const products = [
+      {
+        label: "Gasoline",
+        elementPrefix: "gasoline",
+        futuresKey: "futuresGasoline",
+        costKey: "costGasoline",
+        basisKey: "basisGasoline",
+      },
+      {
+        label: "Diesel",
+        elementPrefix: "diesel",
+        futuresKey: "futuresDiesel",
+        costKey: "costDiesel",
+        basisKey: "basisDiesel",
+      },
+      {
+        label: "Jet Fuel",
+        elementPrefix: "jet",
+        futuresKey: "futuresJet",
+        costKey: "costJet",
+        basisKey: "basisJet",
+      },
+    ];
+
+    products.forEach((product) => {
+      const futuresValue = Number(metrics[product.futuresKey]);
+      const costValue = Number(metrics[product.costKey]);
+      const basisValue = Number(metrics[product.basisKey]);
+
+      const futuresEl = this.elements[`${product.elementPrefix}Futures`];
+      if (futuresEl) {
+        futuresEl.textContent = this._formatCurrency(futuresValue);
+        futuresEl.setAttribute(
+          "title",
+          `${product.label} futures respond to demand, reliability, and shipping performance.`
+        );
+      }
+
+      const costEl = this.elements[`${product.elementPrefix}Cost`];
+      if (costEl) {
+        costEl.textContent = this._formatCurrency(costValue);
+        costEl.setAttribute(
+          "title",
+          `${product.label} per-barrel production cost including crude, maintenance, and logistics penalties.`
+        );
+      }
+
+      const basisEl = this.elements[`${product.elementPrefix}Basis`];
+      if (basisEl) {
+        const nearZero = !Number.isFinite(basisValue) || Math.abs(basisValue) < 0.005;
+        const formatted = nearZero ? "$0.00" : this._formatSignedCurrency(basisValue);
+        basisEl.textContent = formatted;
+        basisEl.classList.toggle("positive", !nearZero && basisValue > 0.01);
+        basisEl.classList.toggle("negative", !nearZero && basisValue < -0.01);
+        basisEl.setAttribute("aria-label", `${product.label} basis ${formatted}`);
+        basisEl.setAttribute("title", `Futures spread: ${formatted}`);
+      }
+    });
+  }
+
+  _formatCurrency(value) {
+    if (!Number.isFinite(value)) {
+      return "$0.00";
+    }
+    return this.priceFormatter.format(value);
+  }
+
+  _formatSignedCurrency(value) {
+    if (!Number.isFinite(value)) {
+      return "$0.00";
+    }
+    const absolute = Math.abs(value);
+    if (absolute < 0.005) {
+      return "$0.00";
+    }
+    const formatted = this.priceFormatter.format(absolute);
+    const sign = value > 0 ? "+" : "-";
+    return `${sign}${formatted}`;
   }
 
   _renderLogs() {

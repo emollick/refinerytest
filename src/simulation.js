@@ -47,6 +47,15 @@ export class RefinerySimulation {
       expensePerDay: 0,
       penaltyPerDay: 0,
       marginMultiplier: 1,
+      futuresGasoline: 0,
+      futuresDiesel: 0,
+      futuresJet: 0,
+      costGasoline: 0,
+      costDiesel: 0,
+      costJet: 0,
+      basisGasoline: 0,
+      basisDiesel: 0,
+      basisJet: 0,
       reliability: 1,
       carbon: 0,
       waste: 0,
@@ -79,6 +88,7 @@ export class RefinerySimulation {
     };
 
     this.performanceHistory = [];
+    this.market = this._initMarketState();
 
     this.storage = this._initStorage();
     this.storageAlertCache = this._createStorageAlertCache();
@@ -191,6 +201,34 @@ export class RefinerySimulation {
         maintenancePenalty: 0.42,
         environmentPressure: 0.42,
       },
+    };
+  }
+
+  _initMarketState() {
+    const baseFutures = {
+      gasoline: 112,
+      diesel: 96,
+      jet: 108,
+    };
+    const productionCost = {
+      gasoline: 78,
+      diesel: 74,
+      jet: 81,
+    };
+    return {
+      futures: { ...baseFutures },
+      productionCost: { ...productionCost },
+      basis: {
+        gasoline: baseFutures.gasoline - productionCost.gasoline,
+        diesel: baseFutures.diesel - productionCost.diesel,
+        jet: baseFutures.jet - productionCost.jet,
+      },
+      drift: {
+        gasoline: 0,
+        diesel: 0,
+        jet: 0,
+      },
+      updatedAt: this.timeMinutes || 0,
     };
   }
 
@@ -354,6 +392,15 @@ export class RefinerySimulation {
       expensePerDay: 0,
       penaltyPerDay: 0,
       marginMultiplier: 1,
+      futuresGasoline: 0,
+      futuresDiesel: 0,
+      futuresJet: 0,
+      costGasoline: 0,
+      costDiesel: 0,
+      costJet: 0,
+      basisGasoline: 0,
+      basisDiesel: 0,
+      basisJet: 0,
       reliability: 1,
       carbon: 0,
       waste: 0,
@@ -408,6 +455,7 @@ export class RefinerySimulation {
       unit.lastIncident = null;
     });
     this.performanceHistory = [];
+    this.market = this._initMarketState();
     this.logs = [];
     this.pushLog(
       "info",
@@ -429,6 +477,17 @@ export class RefinerySimulation {
 
   getScenarioList() {
     return Object.values(this.scenarios);
+  }
+
+  getMarketState() {
+    if (!this.market) {
+      this.market = this._initMarketState();
+    }
+    return {
+      futures: { ...this.market.futures },
+      productionCost: { ...this.market.productionCost },
+      basis: { ...this.market.basis },
+    };
   }
 
   update(deltaSeconds) {
@@ -718,6 +777,18 @@ export class RefinerySimulation {
     const adjustedRevenue = productRevenue * marketConditions.multiplier;
     const carryingCost = marketConditions.carryingCost;
     const totalOperatingExpense = operatingExpense + fixedOverhead + carryingCost + extraOperationalCost;
+    const economy = this._updateEconomy({
+      scenario,
+      spotPrices: { gasoline: gasolinePrice, diesel: dieselPrice, jet: jetPrice },
+      production: result,
+      crudeCostPerBbl,
+      totalOperatingExpense,
+      penalty,
+      logistics: logisticsReport,
+      incidents: incidentsRisk,
+      marketConditions,
+      crudeThroughput,
+    });
     const profitPerDay = adjustedRevenue - crudeExpense - totalOperatingExpense - penalty;
     const profitPerHour = profitPerDay / HOURS_PER_DAY;
 
@@ -731,6 +802,15 @@ export class RefinerySimulation {
     this.metrics.expensePerDay = totalOperatingExpense;
     this.metrics.penaltyPerDay = penalty;
     this.metrics.marginMultiplier = marketConditions.multiplier;
+    this.metrics.futuresGasoline = economy.futures.gasoline;
+    this.metrics.futuresDiesel = economy.futures.diesel;
+    this.metrics.futuresJet = economy.futures.jet;
+    this.metrics.costGasoline = economy.productionCost.gasoline;
+    this.metrics.costDiesel = economy.productionCost.diesel;
+    this.metrics.costJet = economy.productionCost.jet;
+    this.metrics.basisGasoline = economy.basis.gasoline;
+    this.metrics.basisDiesel = economy.basis.diesel;
+    this.metrics.basisJet = economy.basis.jet;
     this.metrics.waste = result.waste;
     this.metrics.flareLevel = clamp((result.waste + flare * 1.4) / (crudeThroughput * 0.5 || 1), 0, 1);
     this.metrics.incidents = incidentsRisk.incidents;
@@ -1384,6 +1464,119 @@ export class RefinerySimulation {
     this.metrics.shipmentReliability = shipmentTotal ? clamp(onTime / shipmentTotal, 0, 1) : 1;
 
     return report;
+  }
+
+  _updateEconomy({
+    scenario,
+    spotPrices,
+    production,
+    crudeCostPerBbl,
+    totalOperatingExpense,
+    penalty,
+    logistics,
+    incidents,
+    marketConditions,
+    crudeThroughput,
+  }) {
+    if (!this.market) {
+      this.market = this._initMarketState();
+    }
+    const state = this.market;
+    const spot = spotPrices || {};
+    const prod = production || {};
+    const totalOutput = Math.max((prod.gasoline || 0) + (prod.diesel || 0) + (prod.jet || 0), 0);
+    const totalBarrels = totalOutput > 0 ? totalOutput * 1000 : 0;
+    const throughput = Math.max(crudeThroughput || 0, 0.001);
+    const feedConversion = totalOutput > 0 ? clamp(throughput / totalOutput, 0.55, 1.4) : 1;
+    const feedCostPerBbl = crudeCostPerBbl * feedConversion;
+    const operationsPerBbl = totalBarrels > 0 ? totalOperatingExpense / totalBarrels : 0;
+    const penaltyPerBbl = totalBarrels > 0 ? penalty / totalBarrels : 0;
+    const carryingPerBbl =
+      totalBarrels > 0 && marketConditions
+        ? (marketConditions.carryingCost || 0) / totalBarrels
+        : 0;
+
+    const shippingReliability = clamp(this.metrics.shipmentReliability ?? 1, 0, 1);
+    const downtimeReliability = clamp(this.metrics.reliability ?? 1, 0, 1);
+    const directiveReliability = clamp(this.metrics.directiveReliability ?? 1, 0, 1);
+    const shippingPressure = Math.max(0, 1 - shippingReliability);
+    const downtimePressure = Math.max(0, 1 - downtimeReliability);
+    const directiveDrag = Math.max(0, 1 - directiveReliability);
+
+    const maintenanceLevel = clamp(this.params.maintenance ?? 0.62, 0, 1);
+    const safetyLevel = clamp(this.params.safety ?? 0.45, 0, 1);
+    const environmentLevel = clamp(this.params.environment ?? 0.35, 0, 1);
+    const maintenanceRelief = clamp(maintenanceLevel - 0.62, -0.35, 0.35);
+    const safetyPremium = clamp(0.48 - safetyLevel, -0.25, 0.45);
+    const environmentPremium = clamp(environmentLevel - 0.35, -0.25, 0.5);
+
+    const demandDaily = this._calculateMarketDemand(HOURS_PER_DAY, scenario || this.activeScenario);
+    const smoothingFutures = 0.25;
+    const smoothingCost = 0.35;
+
+    const weightProfile = {
+      gasoline: { shipping: 1.05, downtime: 0.9, maintenance: 0.82, env: 0.65 },
+      diesel: { shipping: 0.92, downtime: 1.05, maintenance: 1, env: 0.88 },
+      jet: { shipping: 1.2, downtime: 1.12, maintenance: 0.9, env: 1.12 },
+    };
+
+    Object.keys(weightProfile).forEach((product) => {
+      const weights = weightProfile[product];
+      const output = Math.max(prod[product] || 0, 0);
+      const share = totalOutput > 0 ? output / totalOutput : 0;
+      const demand = Math.max(demandDaily[product] || 0, 0.0001);
+      const demandGap = clamp(demand > 0 ? (demand - output) / demand : 0, -0.45, 0.6);
+      const logisticPenalty = logistics?.penalty || 0;
+      const logisticDrag = totalBarrels > 0 ? logisticPenalty / totalBarrels : 0;
+
+      state.drift[product] = clamp(
+        (state.drift[product] || 0) * 0.82 + demandGap * 0.25 - shippingPressure * 0.18,
+        -0.6,
+        0.6
+      );
+
+      const costTarget = Math.max(
+        feedCostPerBbl * 0.78,
+        feedCostPerBbl +
+          operationsPerBbl +
+          carryingPerBbl +
+          penaltyPerBbl * (0.4 + share * 0.5) +
+          logisticDrag * (0.3 + weights.shipping * 0.2) +
+          shippingPressure * weights.shipping * 18 +
+          downtimePressure * weights.downtime * 22 +
+          directiveDrag * 8 +
+          environmentPremium * weights.env * 12 +
+          safetyPremium * weights.maintenance * 7 -
+          maintenanceRelief * weights.maintenance * 18
+      );
+
+      const prevCost = Number.isFinite(state.productionCost[product])
+        ? state.productionCost[product]
+        : costTarget;
+      const newCost = prevCost + (costTarget - prevCost) * smoothingCost;
+      state.productionCost[product] = Math.max(newCost, feedCostPerBbl * 0.65);
+
+      const spotPrice = Math.max(spot[product] || state.futures[product] || newCost, 0);
+      const futuresTarget = Math.max(
+        spotPrice * 0.58,
+        spotPrice *
+          (1 + demandGap * 0.58 + shippingPressure * weights.shipping * 0.3 + downtimePressure * weights.downtime * 0.24 - maintenanceRelief * weights.maintenance * 0.18) +
+          (penaltyPerBbl + carryingPerBbl) * 0.55 +
+          logisticDrag * 2.5 +
+          state.drift[product] * 9 +
+          environmentPremium * weights.env * 4
+      );
+
+      const prevFuture = Number.isFinite(state.futures[product])
+        ? state.futures[product]
+        : futuresTarget;
+      const newFuture = prevFuture + (futuresTarget - prevFuture) * smoothingFutures;
+      state.futures[product] = Math.max(newFuture, 12);
+      state.basis[product] = state.futures[product] - state.productionCost[product];
+    });
+
+    state.updatedAt = this.timeMinutes;
+    return state;
   }
 
   _consumeOperationalCost() {
@@ -2191,6 +2384,7 @@ export class RefinerySimulation {
       directiveStats: { ...this.directiveStats },
       performanceHistory: this.performanceHistory.map((entry) => ({ ...entry })),
       logs: this.logs.map((entry) => ({ ...entry })),
+      market: this.getMarketState(),
     };
 
     return snapshot;
@@ -2280,6 +2474,46 @@ export class RefinerySimulation {
 
     this.metrics = { ...this.metrics, ...(snapshot.metrics || {}) };
     this.flows = { ...this.flows, ...(snapshot.flows || {}) };
+
+    if (snapshot.market && typeof snapshot.market === "object") {
+      const restored = this._initMarketState();
+      if (snapshot.market.futures && typeof snapshot.market.futures === "object") {
+        Object.entries(snapshot.market.futures).forEach(([product, value]) => {
+          if (typeof value === "number" && Number.isFinite(value)) {
+            restored.futures[product] = value;
+          }
+        });
+      }
+      if (snapshot.market.productionCost && typeof snapshot.market.productionCost === "object") {
+        Object.entries(snapshot.market.productionCost).forEach(([product, value]) => {
+          if (typeof value === "number" && Number.isFinite(value)) {
+            restored.productionCost[product] = value;
+          }
+        });
+      }
+      if (snapshot.market.basis && typeof snapshot.market.basis === "object") {
+        Object.entries(snapshot.market.basis).forEach(([product, value]) => {
+          if (typeof value === "number" && Number.isFinite(value)) {
+            restored.basis[product] = value;
+          }
+        });
+      }
+      this.market = restored;
+    } else {
+      this.market = this._initMarketState();
+    }
+
+    if (this.market) {
+      this.metrics.futuresGasoline = this.market.futures.gasoline;
+      this.metrics.futuresDiesel = this.market.futures.diesel;
+      this.metrics.futuresJet = this.market.futures.jet;
+      this.metrics.costGasoline = this.market.productionCost.gasoline;
+      this.metrics.costDiesel = this.market.productionCost.diesel;
+      this.metrics.costJet = this.market.productionCost.jet;
+      this.metrics.basisGasoline = this.market.basis.gasoline;
+      this.metrics.basisDiesel = this.market.basis.diesel;
+      this.metrics.basisJet = this.market.basis.jet;
+    }
 
     if (typeof snapshot.marketStress === "number" && Number.isFinite(snapshot.marketStress)) {
       this.marketStress = clamp(snapshot.marketStress, 0, 1);

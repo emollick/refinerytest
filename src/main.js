@@ -347,8 +347,12 @@ class TileRenderer {
 
   resizeToContainer(container) {
     const rect = container.getBoundingClientRect();
-    const width = Math.max(720, Math.floor(rect.width));
-    const height = Math.max(480, Math.floor(rect.height));
+    const fallbackWidth = container.clientWidth || container.offsetWidth || this.displayWidth || 720;
+    const rawWidth = Math.floor(rect.width);
+    const width = Math.max(360, Number.isFinite(rawWidth) && rawWidth > 0 ? rawWidth : fallbackWidth);
+    const fallbackHeight = container.clientHeight || container.offsetHeight || this.displayHeight || 480;
+    const rawHeight = Math.floor(rect.height);
+    const height = Math.max(360, Number.isFinite(rawHeight) && rawHeight > 0 ? rawHeight : fallbackHeight);
     this.svg.setAttribute("width", width);
     this.svg.setAttribute("height", height);
     this.svg.style.width = `${width}px`;
@@ -3553,4 +3557,3 @@ function buildUnitConnectionIndex(topology) {
   });
   return map;
 }
-
