@@ -182,6 +182,36 @@ const pipelineConfigs = [
 ];
 
 
+const CAMERA_INTERACTION_ENABLED = false;
+
+const BASE_TILE_LAYOUT = [
+  "WWWWSSSSTTTTPPPP",
+  "WWWWSSSSTTTTPPPP",
+  "SSSSGGGGTTTTPPPP",
+  "SSSSGGGGTPPPPPPP",
+  "GGGGGGGGTPPPPPPP",
+  "GGGGGGGGTPPPPPPP",
+  "GGGGGGGGTPPPPPPP",
+  "FGFGFGGGTPPPPPPP",
+  "FGFGFGGGTPPPPPPP",
+  "FFFGFGGGVPPPPPPP",
+  "FFFGFGGGVPPPPPPP",
+  "FFFFRRRRXRRRRRRR",
+];
+
+const TILE_CHAR_MAP = {
+  W: "water",
+  S: "shore",
+  G: "grass",
+  F: "field",
+  T: "walkway",
+  P: "pavement",
+  R: "road-ew",
+  V: "road-ns",
+  X: "road-cross",
+};
+
+
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 class TileRenderer {
@@ -211,6 +241,7 @@ class TileRenderer {
     this.deviceScaleX = 1;
     this.deviceScaleY = 1;
     this.paletteIndex = 0;
+    this.interactionEnabled = CAMERA_INTERACTION_ENABLED;
     this.camera = {
       zoom: 1,
       minZoom: 0.65,
@@ -222,6 +253,7 @@ class TileRenderer {
       homeZoom: 1,
       userControlled: false,
     };
+    this.defaultCameraRange = { min: this.camera.minZoom, max: this.camera.maxZoom };
     this.panSession = null;
 
     this.palettes = [
@@ -302,6 +334,10 @@ class TileRenderer {
     this._applyPalette();
     this.mapBounds = this._calculateMapBounds();
     this._fitCameraToView();
+    if (!this.interactionEnabled) {
+      this._lockCamera();
+    }
+
     this.resizeToContainer(this.container);
   }
 
@@ -321,6 +357,14 @@ class TileRenderer {
     this.deviceScaleY = this.viewHeight / height;
     this.displayWidth = width;
     this.displayHeight = height;
+    if (!this.interactionEnabled) {
+      this.camera.userControlled = false;
+      this.camera.minZoom = this.defaultCameraRange.min;
+      this.camera.maxZoom = this.defaultCameraRange.max;
+      this._fitCameraToView({ preserveZoom: false });
+      this._lockCamera();
+      return;
+    }
     if (!this.camera.userControlled) {
       this._fitCameraToView({ preserveZoom: true });
     } else {
@@ -487,7 +531,14 @@ class TileRenderer {
   resetView() {
     this.pointer.active = false;
     this.camera.userControlled = false;
+    if (!this.interactionEnabled) {
+      this.camera.minZoom = this.defaultCameraRange.min;
+      this.camera.maxZoom = this.defaultCameraRange.max;
+    }
     this._fitCameraToView({ preserveZoom: false });
+    if (!this.interactionEnabled) {
+      this._lockCamera();
+    }
   }
 
   getSurfaceBounds() {
@@ -495,6 +546,9 @@ class TileRenderer {
   }
 
   nudgeCamera(deltaX, deltaY) {
+    if (!this.interactionEnabled) {
+      return;
+    }
     if (!Number.isFinite(deltaX) && !Number.isFinite(deltaY)) {
       return;
     }
@@ -1662,6 +1716,17 @@ class TileRenderer {
     this.worldGroup.setAttribute("transform", `matrix(${matrix})`);
   }
 
+  _lockCamera() {
+    this.camera.homeOffsetX = this.camera.offsetX;
+    this.camera.homeOffsetY = this.camera.offsetY;
+    this.camera.homeZoom = this.camera.zoom;
+    this.camera.minZoom = this.camera.zoom;
+    this.camera.maxZoom = this.camera.zoom;
+    this.camera.userControlled = false;
+    this.panSession = null;
+    this._updateCameraTransform();
+  }
+
   _clampCamera() {
     if (!this.mapBounds) {
       return false;
@@ -1710,6 +1775,9 @@ class TileRenderer {
   }
 
   _ensureCameraVisible() {
+    if (!this.interactionEnabled) {
+      return;
+    }
     if (!this.mapBounds) {
       return;
     }
@@ -1732,6 +1800,34 @@ class TileRenderer {
   }
 
   _stabilizeCamera() {
+    if (!this.interactionEnabled) {
+      const targetOffsetX = Number.isFinite(this.camera.homeOffsetX)
+        ? this.camera.homeOffsetX
+        : this.camera.offsetX;
+      const targetOffsetY = Number.isFinite(this.camera.homeOffsetY)
+        ? this.camera.homeOffsetY
+        : this.camera.offsetY;
+      const targetZoom = Number.isFinite(this.camera.homeZoom)
+        ? this.camera.homeZoom
+        : this.camera.zoom;
+      let changed = false;
+      if (Math.abs(this.camera.offsetX - targetOffsetX) > 0.01) {
+        this.camera.offsetX = targetOffsetX;
+        changed = true;
+      }
+      if (Math.abs(this.camera.offsetY - targetOffsetY) > 0.01) {
+        this.camera.offsetY = targetOffsetY;
+        changed = true;
+      }
+      if (Math.abs(this.camera.zoom - targetZoom) > 0.0001) {
+        this.camera.zoom = targetZoom;
+        changed = true;
+      }
+      if (changed) {
+        this._updateCameraTransform();
+      }
+      return;
+    }
     if (this.camera.userControlled) {
       if (this._clampCamera()) {
         this._updateCameraTransform();
@@ -1778,6 +1874,9 @@ class TileRenderer {
   }
 
   beginPan(screenX, screenY) {
+    if (!this.interactionEnabled) {
+      return;
+    }
     this.panSession = {
       startX: screenX,
       startY: screenY,
@@ -1788,6 +1887,9 @@ class TileRenderer {
   }
 
   panTo(screenX, screenY) {
+    if (!this.interactionEnabled) {
+      return;
+    }
     if (!this.panSession) {
       return;
     }
@@ -1800,6 +1902,9 @@ class TileRenderer {
   }
 
   endPan() {
+    if (!this.interactionEnabled) {
+      return;
+    }
     this.panSession = null;
   }
 
@@ -1808,6 +1913,9 @@ class TileRenderer {
   }
 
   zoomAt(screenX, screenY, deltaY) {
+    if (!this.interactionEnabled) {
+      return;
+    }
     const zoomFactor = Math.exp(-deltaY * 0.0012);
     const nextZoom = clamp(this.camera.zoom * zoomFactor, this.camera.minZoom, this.camera.maxZoom);
     if (Math.abs(nextZoom - this.camera.zoom) < 0.0001) {
@@ -1824,6 +1932,10 @@ class TileRenderer {
   }
 
   focusOnUnit(unitId, { onlyIfVisible = true } = {}) {
+    if (!this.interactionEnabled) {
+      this._lockCamera();
+      return;
+    }
     if (!unitId) {
       return;
     }
@@ -1862,57 +1974,21 @@ class TileRenderer {
   }
 
   _buildBaseTiles() {
-    const tiles = Array.from({ length: this.mapRows }, () =>
-      Array.from({ length: this.mapCols }, () => "pavement")
-    );
-
+    const tiles = [];
     for (let y = 0; y < this.mapRows; y += 1) {
+      const pattern = BASE_TILE_LAYOUT[y] || "";
+      const row = [];
       for (let x = 0; x < this.mapCols; x += 1) {
-        if (x < 2 && y < 6) {
-          tiles[y][x] = "water";
-        } else if (x < 2 && y < 8) {
-          tiles[y][x] = "shore";
-        } else if (y >= this.mapRows - 3 && x < 4) {
-          tiles[y][x] = "field";
-        } else if (y >= this.mapRows - 4 && x < 5) {
-          tiles[y][x] = "field";
-        } else if (y < 3 && x >= this.mapCols - 3) {
-          tiles[y][x] = "water";
-        } else if (x === 2 && y >= 6 && y < this.mapRows - 1) {
-          tiles[y][x] = "grass";
-        } else if (y === this.mapRows - 1 && x >= 4) {
-          tiles[y][x] = "grass";
-        } else if (y >= 3 && y <= 4 && x >= 3 && x <= 5) {
-          tiles[y][x] = "green";
+        const symbol = pattern[x] || "P";
+        let type = TILE_CHAR_MAP[symbol] || "pavement";
+        if (type === "field" && (x + y) % 2 === 1) {
+          type = "fieldAlt";
+        } else if (type === "grass" && (x + y) % 3 === 0) {
+          type = "green";
         }
-        const current = tiles[y][x];
-        if (
-          y === 5 &&
-          x >= 2 &&
-          x <= this.mapCols - 2 &&
-          current !== "water" &&
-          current !== "shore"
-        ) {
-          tiles[y][x] = current?.startsWith("road") ? "road-cross" : "road-ew";
-        }
-        if (
-          x === 7 &&
-          y >= 2 &&
-          y <= this.mapRows - 2 &&
-          current !== "water" &&
-          current !== "shore"
-        ) {
-          tiles[y][x] = tiles[y][x]?.startsWith("road") ? "road-cross" : "road-ns";
-        }
-        if (
-          (x === 6 || x === 8 || (y === 6 && (x === 5 || x === 9))) &&
-          tiles[y][x] !== "water" &&
-          tiles[y][x] !== "shore" &&
-          !tiles[y][x]?.startsWith("road")
-        ) {
-          tiles[y][x] = "walkway";
-        }
+        row.push(type);
       }
+      tiles.push(row);
     }
     return tiles;
   }
@@ -2286,43 +2362,6 @@ surface.addEventListener("mouseleave", () => {
   }
 });
 
-surface.addEventListener("pointerdown", (event) => {
-  if (event.button !== 0) {
-    return;
-  }
-  const rect = surface.getBoundingClientRect();
-  const pointerX = (event.clientX - rect.left) * renderer.deviceScaleX;
-  const pointerY = (event.clientY - rect.top) * renderer.deviceScaleY;
-  panPointerId = event.pointerId;
-  panStart = { x: pointerX, y: pointerY };
-  panMoved = false;
-  surface.setPointerCapture(event.pointerId);
-});
-
-surface.addEventListener("pointermove", (event) => {
-  if (panPointerId !== event.pointerId) {
-    return;
-  }
-  const rect = surface.getBoundingClientRect();
-  const pointerX = (event.clientX - rect.left) * renderer.deviceScaleX;
-  const pointerY = (event.clientY - rect.top) * renderer.deviceScaleY;
-  if (!renderer.isPanning()) {
-    const dx = pointerX - panStart.x;
-    const dy = pointerY - panStart.y;
-    if (Math.hypot(dx, dy) > 6) {
-      renderer.beginPan(panStart.x, panStart.y);
-      renderer.setPointer(0, 0, false);
-      if (mapViewport) {
-        mapViewport.classList.add("panning");
-      }
-    } else {
-      return;
-    }
-  }
-  renderer.panTo(pointerX, pointerY);
-  panMoved = true;
-});
-
 const endPan = (event) => {
   if (panPointerId !== event.pointerId) {
     return;
@@ -2337,48 +2376,89 @@ const endPan = (event) => {
   panPointerId = null;
 };
 
-surface.addEventListener("pointerup", (event) => {
-  endPan(event);
-});
-
-surface.addEventListener("pointercancel", (event) => {
-  endPan(event);
-});
-
-surface.addEventListener(
-  "wheel",
-  (event) => {
-    event.preventDefault();
+if (renderer.interactionEnabled) {
+  surface.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) {
+      return;
+    }
     const rect = surface.getBoundingClientRect();
     const pointerX = (event.clientX - rect.left) * renderer.deviceScaleX;
     const pointerY = (event.clientY - rect.top) * renderer.deviceScaleY;
-    const panIntent = event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY) * 0.75;
-    if (panIntent) {
-      let deltaX = event.deltaX;
-      let deltaY = event.deltaY;
-      const DOM_DELTA_LINE = typeof WheelEvent !== "undefined" ? WheelEvent.DOM_DELTA_LINE : 1;
-      const DOM_DELTA_PAGE = typeof WheelEvent !== "undefined" ? WheelEvent.DOM_DELTA_PAGE : 2;
-      if (event.deltaMode === DOM_DELTA_LINE) {
-        deltaX *= 32;
-        deltaY *= 32;
-      } else if (event.deltaMode === DOM_DELTA_PAGE) {
-        deltaX *= surface.clientWidth || 1;
-        deltaY *= surface.clientHeight || 1;
-      }
-      deltaX = -deltaX * renderer.deviceScaleX;
-      deltaY = -deltaY * renderer.deviceScaleY;
-      renderer.nudgeCamera(deltaX, deltaY);
-    } else {
-      renderer.zoomAt(pointerX, pointerY, event.deltaY);
-    }
-  },
-  { passive: false }
-);
+    panPointerId = event.pointerId;
+    panStart = { x: pointerX, y: pointerY };
+    panMoved = false;
+    surface.setPointerCapture(event.pointerId);
+  });
 
-surface.addEventListener("dblclick", (event) => {
-  event.preventDefault();
-  renderer.resetView();
-});
+  surface.addEventListener("pointermove", (event) => {
+    if (panPointerId !== event.pointerId) {
+      return;
+    }
+    const rect = surface.getBoundingClientRect();
+    const pointerX = (event.clientX - rect.left) * renderer.deviceScaleX;
+    const pointerY = (event.clientY - rect.top) * renderer.deviceScaleY;
+    if (!renderer.isPanning()) {
+      const dx = pointerX - panStart.x;
+      const dy = pointerY - panStart.y;
+      if (Math.hypot(dx, dy) > 6) {
+        renderer.beginPan(panStart.x, panStart.y);
+        renderer.setPointer(0, 0, false);
+        if (mapViewport) {
+          mapViewport.classList.add("panning");
+        }
+      } else {
+        return;
+      }
+    }
+    renderer.panTo(pointerX, pointerY);
+    panMoved = true;
+  });
+
+  surface.addEventListener("pointerup", (event) => {
+    endPan(event);
+  });
+
+  surface.addEventListener("pointercancel", (event) => {
+    endPan(event);
+  });
+
+  surface.addEventListener(
+    "wheel",
+    (event) => {
+      event.preventDefault();
+      const rect = surface.getBoundingClientRect();
+      const pointerX = (event.clientX - rect.left) * renderer.deviceScaleX;
+      const pointerY = (event.clientY - rect.top) * renderer.deviceScaleY;
+      const panIntent = event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY) * 0.75;
+      if (panIntent) {
+        let deltaX = event.deltaX;
+        let deltaY = event.deltaY;
+        const DOM_DELTA_LINE = typeof WheelEvent !== "undefined" ? WheelEvent.DOM_DELTA_LINE : 1;
+        const DOM_DELTA_PAGE = typeof WheelEvent !== "undefined" ? WheelEvent.DOM_DELTA_PAGE : 2;
+        if (event.deltaMode === DOM_DELTA_LINE) {
+          deltaX *= 32;
+          deltaY *= 32;
+        } else if (event.deltaMode === DOM_DELTA_PAGE) {
+          deltaX *= surface.clientWidth || 1;
+          deltaY *= surface.clientHeight || 1;
+        }
+        deltaX = -deltaX * renderer.deviceScaleX;
+        deltaY = -deltaY * renderer.deviceScaleY;
+        renderer.nudgeCamera(deltaX, deltaY);
+      } else {
+        renderer.zoomAt(pointerX, pointerY, event.deltaY);
+      }
+    },
+    { passive: false }
+  );
+
+  surface.addEventListener("dblclick", (event) => {
+    event.preventDefault();
+    renderer.resetView();
+  });
+} else {
+  surface.style.cursor = "default";
+}
 
 surface.addEventListener("click", (event) => {
   if (event.detail > 1) {
@@ -3443,7 +3523,7 @@ function renderPrototypeNotes() {
     "Session → Load Old/New drop you into curated Chevron training scenarios with different bottlenecks to solve.",
     "ROAD dispatches a truck convoy to bleed down whichever product tanks are overflowing the most.",
     "PIPE stages a temporary bypass for the selected unit’s feed, while BULLDOZE schedules a turnaround to restore integrity.",
-    "Drag the refinery map to pan and use the mouse wheel to zoom in on the SimCity-style detail work.",
+    "The refinery map stays locked to the SimCity-style tile board — click a unit to inspect its connections and controls.",
   ].forEach((line) => {
     const item = document.createElement("li");
     item.textContent = line;
