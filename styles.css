@@ -321,6 +321,11 @@ body {
   display: block;
 }
 
+#scene-container.tile-surface {
+  position: relative;
+  min-height: 100%;
+}
+
 #scene-container canvas {
   image-rendering: pixelated;
   filter: saturate(1.05) contrast(1.05);
@@ -331,6 +336,7 @@ body {
   height: 100%;
   display: block;
   overflow: visible;
+  image-rendering: pixelated;
 }
 
 .tile-layer {
@@ -397,6 +403,7 @@ body {
 .walkway-detail .walkway-stripe {
   stroke-width: 1.4px;
   stroke-linecap: round;
+  opacity: 0.65;
 }
 
 .walkway-detail .walkway-post {
@@ -435,7 +442,7 @@ body {
 
 .shore-detail .shore-foam {
   fill: none;
-  stroke-width: 1.8px;
+  stroke-width: 1.9px;
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-dasharray: 7 9;
@@ -609,6 +616,42 @@ body {
 
 .decor.flare {
   fill: rgba(255, 186, 88, 0.82);
+}
+
+.decor.ship {
+  pointer-events: none;
+}
+
+.decor.ship-wake {
+  fill: none;
+  stroke: rgba(212, 234, 255, 0.35);
+  stroke-width: 3px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.decor.ship-hull {
+  fill: #9d4439;
+  stroke: #2c1814;
+  stroke-width: 2.2px;
+}
+
+.decor.ship-deck {
+  fill: #d6bc90;
+  stroke: #3b2a18;
+  stroke-width: 1.6px;
+}
+
+.decor.ship-bridge {
+  fill: #f3ebd8;
+  stroke: #3a2e1f;
+  stroke-width: 1.4px;
+}
+
+.decor.ship-stack {
+  fill: #f4f4f2;
+  stroke: #2f2e33;
+  stroke-width: 1.2px;
 }
 
 .decor.recording {
