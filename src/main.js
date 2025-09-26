@@ -185,27 +185,41 @@ class CanvasRenderer {
   setHoverUnit(id){ this.hoverUnitId = id; }
   setPointer(x,y,a){ this.pointer = { x, y, active:a }; }
 
-  resizeToContainer(container){
-    const r = container.getBoundingClientRect();
-    const w = Math.max(720, Math.floor(r.width));
-    const h = Math.max(480, Math.floor(r.height));
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
+resizeToContainer(container) {
+  const rect = container.getBoundingClientRect();
+  const w = Math.max(720, Math.floor(rect.width || 0));
+  const h = Math.max(480, Math.floor(rect.height || 0));
 
-    this.canvas.width  = Math.floor(w * dpr);
-    this.canvas.height = Math.floor(h * dpr);
-    this.displayW = w;
-    this.displayH = h;
-    this.dpr = dpr;
-    this.deviceScaleX = dpr;
-    this.deviceScaleY = dpr;
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
 
-    // keep camera centered if user hasn't moved it
-    if (!this.camera.user) {
-      const { ox, oy, zoom } = this._centeredAt(this.camera.zoom);
-      this.camera.ox = ox; this.camera.oy = oy;
-      this.camera.homeOX = ox; this.camera.homeOY = oy; this.camera.homeZoom = zoom;
-    }
+  // Set the device pixel buffer size
+  this.canvas.width  = Math.floor(w * dpr);
+  this.canvas.height = Math.floor(h * dpr);
+
+  // 🔧 KEY FIX: also set CSS pixel size so the canvas is visible even if the
+  // container has no explicit height
+  this.canvas.style.width  = `${w}px`;
+  this.canvas.style.height = `${h}px`;
+
+  this.displayW = w;
+  this.displayH = h;
+
+  // pointer and wheel math use device pixels
+  this.dpr = dpr;
+  this.deviceScaleX = dpr;
+  this.deviceScaleY = dpr;
+
+  // Keep centered until the user moves the camera
+  if (!this.camera.user) {
+    const { ox, oy, zoom } = this._centeredAt(this.camera.zoom);
+    this.camera.ox = ox;
+    this.camera.oy = oy;
+    this.camera.homeOX = ox;
+    this.camera.homeOY = oy;
+    this.camera.homeZoom = zoom;
   }
+}
+
 
   resetView(){
     this.camera.user = false;
