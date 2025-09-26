@@ -337,6 +337,7 @@ class TileRenderer {
     if (!this.interactionEnabled) {
       this._lockCamera();
     }
+
     this.resizeToContainer(this.container);
   }
 
