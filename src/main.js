@@ -287,10 +287,11 @@ class TileRenderer {
     this.pointerNode = this._createPointerNode();
     this.tankNodes = this._createTankNodes();
 
-    this._applyPalette();
-    this.mapBounds = this._calculateMapBounds();
-    this._fitCameraToView();
-    this.resizeToContainer(this.container);
+this._applyPalette();
+this.mapBounds = this._calculateMapBounds();
+this.resizeToContainer(this.container); // size first
+this._fitCameraToView();                // then compute the fit
+
   }
 
   getSurface() {
@@ -384,7 +385,6 @@ resizeToContainer(container) {
   render(deltaSeconds, { flows, logistics }) {
     this.time += deltaSeconds;
     this._stabilizeCamera();
-    this._ensureCameraVisible();
     if (deltaSeconds > 0) {
       this.selectionFlash += deltaSeconds;
     }
@@ -2122,16 +2122,33 @@ if (mapToolbar) {
 }
 
 if ("ResizeObserver" in window) {
-  let resizeTimeout;
+  let lastW = 0;
+  let lastH = 0;
+  let rafId = 0;
+
   const resizeObserver = new ResizeObserver(() => {
-    clearTimeout(resizeTimeout);
-    resizeTimeout = setTimeout(() => {
+    cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(() => {
+      const rect = mapViewport.getBoundingClientRect();
+      const w = Math.floor(rect.width);
+      const h = Math.floor(rect.height);
+      if (w === lastW && h === lastH) return; // no real change
+      lastW = w;
+      lastH = h;
       renderer.resizeToContainer(mapViewport);
-    }, 100);
+    });
   });
+
+  // Initialize the cache and start observing
+  (() => {
+    const rect = mapViewport.getBoundingClientRect();
+    lastW = Math.floor(rect.width);
+    lastH = Math.floor(rect.height);
+  })();
+
   resizeObserver.observe(mapViewport);
 }
-window.addEventListener("resize", () => renderer.resizeToContainer(mapViewport));
+
 renderer.resizeToContainer(mapViewport);
 
 surface.addEventListener("mousemove", (event) => {
