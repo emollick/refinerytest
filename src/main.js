@@ -301,39 +301,39 @@ resizeToContainer(container) {
   const rect = container.getBoundingClientRect();
   const width = Math.max(720, Math.floor(rect.width));
   const height = Math.max(480, Math.floor(rect.height));
-  
-  // Store initial setup flag
-  if (!this.initialSetupDone) {
-    this.initialSetupDone = true;
-    this.svg.setAttribute("width", width);
-    this.svg.setAttribute("height", height);
-    this.svg.style.width = `${width}px`;
-    this.svg.style.height = `${height}px`;
-    this.deviceScaleX = this.viewWidth / width;
-    this.deviceScaleY = this.viewHeight / height;
-    this.displayWidth = width;
-    this.displayHeight = height;
-    
-    // Only fit camera on first setup
-    if (!this.camera.userControlled) {
-      this._fitCameraToView({ preserveZoom: true });
-    }
-    return;
-  }
-  
-  // On subsequent resizes, just update the SVG size but don't touch camera
+
+  const firstTime = !this.initialSetupDone;
+  this.initialSetupDone = true;
+
+  // Update SVG size
   this.svg.setAttribute("width", width);
   this.svg.setAttribute("height", height);
   this.svg.style.width = `${width}px`;
   this.svg.style.height = `${height}px`;
+
+  // Update pixel↔viewBox scales used for pointer math
   this.deviceScaleX = this.viewWidth / width;
   this.deviceScaleY = this.viewHeight / height;
   this.displayWidth = width;
   this.displayHeight = height;
-  
-  // Just update transform without recalculating position
+
+  // If the user hasn't moved the camera yet, keep the map centered
+  if (!this.camera.userControlled) {
+    const { offsetX, offsetY } = this._centeredOffsets(this.camera.zoom);
+    this.camera.offsetX = Math.round(offsetX * 100) / 100;
+    this.camera.offsetY = Math.round(offsetY * 100) / 100;
+
+    // Initialize "home" so double‑click reset works predictably
+    if (firstTime) {
+      this.camera.homeZoom = this.camera.zoom;
+      this.camera.homeOffsetX = this.camera.offsetX;
+      this.camera.homeOffsetY = this.camera.offsetY;
+    }
+  }
+
   this._updateCameraTransform();
 }
+
 
   setGridVisible(visible) {
     this.gridVisible = visible;
@@ -1638,18 +1638,12 @@ _centeredOffsets(zoom) {
   if (!this.mapBounds) {
     return { offsetX: this.camera.offsetX || 0, offsetY: this.camera.offsetY || 0 };
   }
-  // Use actual display dimensions, not viewBox dimensions
-  const displayCenterX = (this.displayWidth || this.viewWidth) / 2;
-  const displayCenterY = (this.displayHeight || this.viewHeight) / 2;
-  
-  const offsetX = displayCenterX / this.deviceScaleX - this.mapBounds.centerX * zoom;
-  const offsetY = displayCenterY / this.deviceScaleY - this.mapBounds.centerY * zoom;
+  // Center the map in viewBox units. Display pixel size is irrelevant here.
+  const offsetX = this.viewWidth / 2 - this.mapBounds.centerX * zoom;
+  const offsetY = this.viewHeight / 2 - this.mapBounds.centerY * zoom;
   return { offsetX, offsetY };
 }
-_ensureCameraVisible() {
-  // Disabled to prevent drift
-  return;
-}
+
 
 
 _stabilizeCamera() {
