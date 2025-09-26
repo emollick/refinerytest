@@ -292,6 +292,7 @@ this.mapBounds = this._calculateMapBounds();
 this.resizeToContainer(this.container); // size first
 this._fitCameraToView();                // then compute the fit
 
+
   }
 
   getSurface() {
@@ -1596,43 +1597,50 @@ _fitCameraToView({ preserveZoom = false } = {}) {
     this.worldGroup.setAttribute("transform", `matrix(${matrix})`);
   }
 
-  _clampCamera() {
-    if (!this.mapBounds) {
-      return false;
-    }
-    const { minX, maxX, minY, maxY } = this.mapBounds;
-    const { zoom } = this.camera;
-    let { offsetX, offsetY } = this.camera;
-    const margin = 48;
-    const width = this.viewWidth;
-    const height = this.viewHeight;
-    const mapWidth = (maxX - minX) * zoom;
-    const mapHeight = (maxY - minY) * zoom;
-    const effectiveMarginX = Math.min(margin, Math.max((width - mapWidth) / 2, 0));
-    const effectiveMarginY = Math.min(margin, Math.max((height - mapHeight) / 2, 0));
+_clampCamera() {
+  if (!this.mapBounds) return false;
 
-    const minOffsetX = effectiveMarginX - minX * zoom;
-    const maxOffsetX = width - effectiveMarginX - maxX * zoom;
-    if (minOffsetX <= maxOffsetX) {
-      offsetX = clamp(offsetX, minOffsetX, maxOffsetX);
-    } else {
-      offsetX = (minOffsetX + maxOffsetX) / 2;
-    }
+  const { minX, maxX, minY, maxY } = this.mapBounds;
+  const { zoom } = this.camera;
+  let { offsetX, offsetY } = this.camera;
 
-    const minOffsetY = effectiveMarginY - minY * zoom;
-    const maxOffsetY = height - effectiveMarginY - maxY * zoom;
-    if (minOffsetY <= maxOffsetY) {
-      offsetY = clamp(offsetY, minOffsetY, maxOffsetY);
-    } else {
-      offsetY = (minOffsetY + maxOffsetY) / 2;
-    }
+  // Work in viewBox units (same space as the transform matrix)
+  const width = this.viewWidth;
+  const height = this.viewHeight;
 
-    const changed =
-      Math.abs(offsetX - this.camera.offsetX) > 0.001 || Math.abs(offsetY - this.camera.offsetY) > 0.001;
-    this.camera.offsetX = offsetX;
-    this.camera.offsetY = offsetY;
-    return changed;
-  }
+  const mapWidth = (maxX - minX) * zoom;
+  const mapHeight = (maxY - minY) * zoom;
+
+  // Only give extra breathing room when the map is smaller than the viewport
+  const margin = 48;
+  const extraX = Math.max((width  - mapWidth)  / 2, 0);
+  const extraY = Math.max((height - mapHeight) / 2, 0);
+  const effectiveMarginX = Math.min(margin, extraX);
+  const effectiveMarginY = Math.min(margin, extraY);
+
+  // Bounds that ensure at least one edge remains visible.
+  // IMPORTANT: do NOT average if they cross; clamp using the sorted bounds.
+  const boundMinX = effectiveMarginX - minX * zoom;
+  const boundMaxX = width - effectiveMarginX - maxX * zoom;
+  const loX = Math.min(boundMinX, boundMaxX);
+  const hiX = Math.max(boundMinX, boundMaxX);
+  offsetX = clamp(offsetX, loX, hiX);
+
+  const boundMinY = effectiveMarginY - minY * zoom;
+  const boundMaxY = height - effectiveMarginY - maxY * zoom;
+  const loY = Math.min(boundMinY, boundMaxY);
+  const hiY = Math.max(boundMinY, boundMaxY);
+  offsetY = clamp(offsetY, loY, hiY);
+
+  const changed =
+    Math.abs(offsetX - this.camera.offsetX) > 0.001 ||
+    Math.abs(offsetY - this.camera.offsetY) > 0.001;
+
+  this.camera.offsetX = offsetX;
+  this.camera.offsetY = offsetY;
+  return changed;
+}
+
 
 _centeredOffsets(zoom) {
   if (!this.mapBounds) {
