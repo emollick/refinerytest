@@ -11,6 +11,15 @@ const HOURS_PER_DAY = 24;
 const perDayToPerHour = (value) => value / HOURS_PER_DAY;
 const perHourToPerDay = (value) => value * HOURS_PER_DAY;
 
+const SHIPMENT_PARCEL_SIZES = {
+  gasoline: 44,
+  diesel: 36,
+  jet: 30,
+};
+
+const SHIPMENT_HORIZON_HOURS = 48;
+const BASE_CRUDE_THROUGHPUT = 120;
+
 export class RefinerySimulation {
   constructor() {
     this.timeMinutes = 0;
@@ -71,6 +80,7 @@ export class RefinerySimulation {
       carbon: 0,
       waste: 0,
       flareLevel: 0,
+      operationalStrain: 0,
       incidents: 0,
       score: 0,
       grade: "B",
@@ -106,13 +116,16 @@ export class RefinerySimulation {
     this.storageAlertCache = this._createStorageAlertCache();
     this.shipments = [];
     this.shipmentStats = { total: 0, onTime: 0, missed: 0 };
-    this.nextShipmentIn = randomRange(8, 12);
+    this.nextShipmentIn = 0;
     this.storagePressure = { active: false, throttle: 1, timer: 0, lastRatio: 0 };
     this.extraShipmentCooldown = 0;
     this.storageUpgrades = { level: 0 };
     this.directives = [];
     this.directiveStats = { total: 0, completed: 0, failed: 0 };
     this._seedDirectives();
+
+    this.shipmentHorizonHours = SHIPMENT_HORIZON_HOURS;
+    this.operationalStrain = 0;
 
     this.unitOverrides = {};
     this.emergencyShutdown = false;
@@ -123,6 +136,9 @@ export class RefinerySimulation {
       "info",
       "Simulation initialized. Adjust the sliders to explore the refinery."
     );
+
+    this._ensureScheduledShipments(this.shipmentHorizonHours);
+    this._updateNextShipmentCountdown();
 
     this.recorder = this._createRecorderState();
     this.lastRecordingSummary = null;
@@ -460,6 +476,7 @@ export class RefinerySimulation {
       carbon: 0,
       waste: 0,
       flareLevel: 0,
+      operationalStrain: 0,
       incidents: 0,
       score: 0,
       grade: "B",
@@ -489,13 +506,15 @@ export class RefinerySimulation {
     this.storageAlertCache = this._createStorageAlertCache();
     this.shipments = [];
     this.shipmentStats = { total: 0, onTime: 0, missed: 0 };
-    this.nextShipmentIn = randomRange(8, 12);
+    this.nextShipmentIn = 0;
     this.storagePressure = { active: false, throttle: 1, timer: 0, lastRatio: 0 };
     this.extraShipmentCooldown = 0;
     this.storageUpgrades = { level: 0 };
     this.directives = [];
     this.directiveStats = { total: 0, completed: 0, failed: 0 };
     this._seedDirectives();
+    this.shipmentHorizonHours = SHIPMENT_HORIZON_HOURS;
+    this.operationalStrain = 0;
     this.unitOverrides = {};
     this.emergencyShutdown = false;
     this.units.forEach((unit) => {
@@ -516,6 +535,8 @@ export class RefinerySimulation {
     this.performanceHistory = [];
     this.market = this._initMarketState();
     this.logs = [];
+    this._ensureScheduledShipments(this.shipmentHorizonHours);
+    this._updateNextShipmentCountdown();
     this.recorder = this._createRecorderState();
     this.lastRecordingSummary = null;
     this.pushLog(
@@ -658,6 +679,16 @@ export class RefinerySimulation {
     const demandGasolineBias = scenario.gasolineBias;
     const demandJetBias = scenario.jetBias;
 
+    const strainState = this._updateOperationalStrain({
+      hours,
+      crudeThroughputPerDay,
+      scenario,
+    });
+
+    if (strainState.factor > 0.2) {
+      this.pendingOperationalCost += strainState.factor * hours * 60;
+    }
+
     const reformerState = this._resolveUnitState("reformer");
     const reformer = reformerState.unit;
     const reformerCapacity =
@@ -797,6 +828,17 @@ export class RefinerySimulation {
     result.waste += residPool + heavyPool;
     result.lpg += Math.max(0, lpgPool);
 
+    if (strainState.penalty > 0.0001) {
+      const penalty = clamp(strainState.penalty, 0, 0.4);
+      const diverted = crudeThroughput * penalty * 0.26;
+      result.gasoline *= 1 - penalty * 0.6;
+      result.diesel *= 1 - penalty * 0.55;
+      result.jet *= 1 - penalty * 0.5;
+      result.lpg *= 1 - penalty * 0.45;
+      result.waste += diverted;
+      flare += diverted * 0.35;
+    }
+
     const basePrices = {
       gasoline: 96,
       diesel: 88,
@@ -826,7 +868,15 @@ export class RefinerySimulation {
 
     const incidentsRisk = this._updateReliability(
       { distillation, reformer, fcc, hydrocracker, alkylation, sulfur },
-      { hours, scenario, flare }
+      {
+        hours,
+        scenario,
+        flare,
+        maintenance: this.params.maintenance,
+        safety: this.params.safety,
+        environment: this.params.environment,
+        strain: strainState,
+      }
     );
 
     const logisticsReport = this._updateLogistics({
@@ -895,6 +945,7 @@ export class RefinerySimulation {
     this.metrics.flareLevel = clamp((result.waste + flare * 1.4) / (crudeThroughput * 0.5 || 1), 0, 1);
     this.metrics.incidents = incidentsRisk.incidents;
     this.metrics.reliability = incidentsRisk.reliability;
+    this.metrics.operationalStrain = this._round(strainState.strain);
 
     const carbonBase =
       result.waste * 3.5 +
@@ -923,6 +974,7 @@ export class RefinerySimulation {
       jet: this.metrics.jet,
       shipmentScore: this.metrics.shipmentReliability,
       directiveScore: this.metrics.directiveReliability,
+      strain: strainState.factor,
     });
 
     this._updateRecorder({
@@ -1021,8 +1073,14 @@ export class RefinerySimulation {
   }
 
   _updateReliability(units, context) {
-    const maintenance = this.params.maintenance;
-    const safety = this.params.safety;
+    const maintenance = clamp(context.maintenance ?? this.params.maintenance ?? 0.6, 0, 1);
+    const safety = clamp(context.safety ?? this.params.safety ?? 0.45, 0, 1);
+    const environment = clamp(context.environment ?? this.params.environment ?? 0.35, 0, 1);
+    const strainFactor = clamp(
+      (context.strain?.strain ?? this.operationalStrain ?? 0) / 12,
+      0,
+      1
+    );
     const scenario = context.scenario;
 
     let incidents = 0;
@@ -1040,15 +1098,29 @@ export class RefinerySimulation {
       const stressWear = Math.max(0, utilization - 1) * 0.04 * context.hours;
       const maintenanceFactor = 1.3 - maintenance * 0.9 - safety * 0.4;
       const scenarioFactor = scenario.riskMultiplier;
-      const wear = (baseWear + stressWear) * maintenanceFactor * scenarioFactor;
+      const strainWear = 1 + strainFactor * 1.4 + clamp((context.flare || 0) / 160, 0, 0.45);
+      const envRelief = clamp(1 - environment * 0.25, 0.6, 1);
+      const wear = (baseWear + stressWear) * maintenanceFactor * scenarioFactor * strainWear * envRelief;
       unit.integrity = clamp(unit.integrity - wear, 0, 1);
       integritySum += unit.integrity;
 
       if (unit.integrity < 0.35 && unit.status === "online") {
         const failurePressure = clamp(0.35 - unit.integrity, 0, 0.35);
         const overload = Math.max(0, utilization - 0.95);
-        const riskIndex =
-          failurePressure * (0.9 + overload * 1.8) * (1.1 - maintenance) * scenario.riskMultiplier;
+        const strainRisk = 1 + strainFactor * 1.6;
+        const flareRisk = 1 + clamp((context.flare || 0) / 140, 0, 0.5);
+        const envShield = clamp(1 - environment * 0.3, 0.55, 1);
+        const riskIndex = clamp(
+          failurePressure *
+            (0.9 + overload * 1.8) *
+            (1.1 - maintenance) *
+            scenario.riskMultiplier *
+            strainRisk *
+            flareRisk *
+            envShield,
+          0,
+          0.85
+        );
         if (Math.random() < riskIndex) {
           const severity = overload > 0.2 && safety < 0.45 ? "danger" : "warning";
           const downtime = 30 + Math.random() * 90 + overload * 120;
@@ -1216,6 +1288,7 @@ export class RefinerySimulation {
     const reliabilityScore = clamp(context.reliability, 0, 1);
     const carbonScore = clamp(1 - context.carbon / 140, 0, 1);
     const incidentScore = clamp(1 - context.incidents * 0.18, 0, 1);
+    const strainScore = clamp(1 - (context.strain ?? clamp(this.operationalStrain / 12, 0, 1)), 0, 1);
     const shipmentScore = clamp(
       typeof context.shipmentScore === "number"
         ? context.shipmentScore
@@ -1232,13 +1305,14 @@ export class RefinerySimulation {
     );
 
     const composite = clamp(
-      throughputScore * 0.2 +
-        profitScore * 0.18 +
-        reliabilityScore * 0.2 +
-        carbonScore * 0.14 +
+      throughputScore * 0.18 +
+        profitScore * 0.16 +
+        reliabilityScore * 0.18 +
+        carbonScore * 0.12 +
         incidentScore * 0.1 +
         shipmentScore * 0.1 +
-        directiveScore * 0.08,
+        directiveScore * 0.08 +
+        strainScore * 0.08,
       0,
       1
     );
@@ -1259,6 +1333,7 @@ export class RefinerySimulation {
       incidentScore,
       shipmentScore,
       directiveScore,
+      strainScore,
     });
     this.metrics.scoreDelta = delta;
 
@@ -1299,6 +1374,14 @@ export class RefinerySimulation {
       issues.push("Unit integrity is slipping; schedule maintenance time.");
     } else if (scores.reliabilityScore > 0.85) {
       highlights.push("Equipment health remains excellent.");
+    }
+
+    if (typeof scores.strainScore === "number") {
+      if (scores.strainScore < 0.6) {
+        issues.push("Operations are running hot — ease crude or invest in maintenance.");
+      } else if (scores.strainScore > 0.85) {
+        highlights.push("Crews kept process strain comfortably in check.");
+      }
     }
 
     if (scores.carbonScore < 0.55) {
@@ -1375,82 +1458,249 @@ export class RefinerySimulation {
     return this.shipments.filter((shipment) => shipment.status === "pending").length;
   }
 
-  _scheduleShipment() {
-    const products = ["gasoline", "diesel", "jet"];
-    const weighted = [];
-    let fallbackProduct = null;
-    let highestRatio = 0;
+  _scheduleShipment(options = {}) {
+    const {
+      product,
+      dueIn,
+      volume,
+      window,
+      rush = false,
+      autoplan = false,
+      context = null,
+    } = options || {};
 
-    products.forEach((product) => {
-      const capacity = this.storage.capacity[product] || 0;
-      const currentLevel = this.storage.levels[product] || 0;
-      const ratio = capacity ? clamp(currentLevel / capacity, 0, 1.2) : 0;
-      if (ratio > highestRatio) {
-        highestRatio = ratio;
-        fallbackProduct = product;
-      }
-      if (ratio >= 0.55) {
-        const weight = ratio >= 1 ? 4 : ratio >= 0.9 ? 3 : 2;
-        for (let i = 0; i < weight; i += 1) {
-          weighted.push(product);
-        }
-      }
+    const planning = context || this._prepareShipmentPlanningContext();
+    const chosenProduct = product || this._pickShipmentProduct(planning.weights);
+    if (!chosenProduct) {
+      return null;
+    }
+
+    const resolvedDueIn = Math.max(
+      0.5,
+      typeof dueIn === "number" && Number.isFinite(dueIn)
+        ? dueIn
+        : randomRange(autoplan ? planning.baseSpacing * 0.85 : 4, autoplan ? planning.baseSpacing * 1.2 : 9)
+    );
+
+    const resolvedVolume = Math.max(
+      18,
+      Math.round(
+        typeof volume === "number" && Number.isFinite(volume)
+          ? volume
+          : this._estimateShipmentVolume(chosenProduct, planning.demandPerDay, rush)
+      )
+    );
+
+    const resolvedWindow = Math.max(
+      3,
+      typeof window === "number" && Number.isFinite(window)
+        ? window
+        : this._estimateShipmentWindow(chosenProduct, resolvedDueIn, { rush, autoplan })
+    );
+
+    return this._registerShipment({
+      product: chosenProduct,
+      dueIn: resolvedDueIn,
+      volume: resolvedVolume,
+      window: resolvedWindow,
+      rush,
+      autoplan,
     });
+  }
 
-    if (weighted.length === 0 && fallbackProduct && highestRatio >= 0.45) {
-      weighted.push(fallbackProduct);
+  _prepareShipmentPlanningContext() {
+    const scenario = this.activeScenario || this.scenarios?.steady || {};
+    const demandPerDay = this._calculateMarketDemand(HOURS_PER_DAY, scenario);
+    const weights = this._calculateShipmentWeights(demandPerDay, scenario);
+    const baseSpacing = this._computeShipmentSpacing(demandPerDay);
+    return { demandPerDay, weights, baseSpacing, scenario };
+  }
+
+  _calculateShipmentWeights(demandPerDay, scenario = {}) {
+    const focus = clamp(this.params.productFocus ?? 0.5, 0, 1);
+    const focusShift = focus - 0.5;
+    const weights = {
+      gasoline: (demandPerDay.gasoline || 0) * (1 + focusShift * 0.55 + (scenario.gasolineBias || 0) * 0.6),
+      diesel: (demandPerDay.diesel || 0) * (1 - focusShift * 0.45 + (scenario.dieselBias || 0) * 0.7),
+      jet: (demandPerDay.jet || 0) * (1 - Math.abs(focusShift) * 0.25 + (scenario.jetBias || 0) * 0.9),
+    };
+    let total = 0;
+    Object.keys(weights).forEach((key) => {
+      weights[key] = Math.max(0.1, weights[key] || 0);
+      total += weights[key];
+    });
+    if (total <= 0) {
+      return { gasoline: 1, diesel: 1, jet: 1 };
+    }
+    return weights;
+  }
+
+  _computeShipmentSpacing(demandPerDay) {
+    const shipmentsPerDay = Object.entries(SHIPMENT_PARCEL_SIZES).reduce((acc, [product, parcel]) => {
+      const volume = Math.max(0, demandPerDay?.[product] || 0);
+      if (!parcel) {
+        return acc;
+      }
+      return acc + volume / parcel;
+    }, 0);
+    if (!Number.isFinite(shipmentsPerDay) || shipmentsPerDay <= 0) {
+      return 10;
+    }
+    return clamp(24 / shipmentsPerDay, 4.5, 14);
+  }
+
+  _pickShipmentProduct(weights) {
+    const entries = Object.entries(weights || {}).filter(([, weight]) => weight > 0);
+    if (!entries.length) {
+      return null;
+    }
+    const total = entries.reduce((sum, [, weight]) => sum + weight, 0);
+    if (total <= 0) {
+      return entries[0][0];
+    }
+    let roll = Math.random() * total;
+    for (const [product, weight] of entries) {
+      roll -= weight;
+      if (roll <= 0) {
+        return product;
+      }
+    }
+    return entries[entries.length - 1][0];
+  }
+
+  _estimateShipmentVolume(product, demandPerDay, rush = false) {
+    const parcel = SHIPMENT_PARCEL_SIZES[product] || 40;
+    const demand = Math.max(0, demandPerDay?.[product] || parcel);
+    const capacity = this.storage?.capacity?.[product] || parcel * 3;
+    const focus = clamp(this.params.productFocus ?? 0.5, 0, 1);
+    const focusShift = focus - 0.5;
+    let mixAdjust = 1;
+    if (product === "gasoline") {
+      mixAdjust += focusShift * 0.55;
+    } else if (product === "diesel") {
+      mixAdjust -= focusShift * 0.45;
+    } else if (product === "jet") {
+      mixAdjust -= Math.abs(focusShift) * 0.25;
+    }
+    const demandFactor = clamp(demand / Math.max(parcel, 1), 0.6, 1.75);
+    const rushFactor = rush ? 1.15 : 1;
+    const estimated = parcel * mixAdjust * demandFactor * rushFactor * randomRange(0.88, 1.12);
+    const maxVolume = capacity * 0.72;
+    return clamp(estimated, parcel * 0.5, maxVolume);
+  }
+
+  _estimateShipmentWindow(product, dueIn, { rush = false, autoplan = false } = {}) {
+    const base = product === "jet" ? 8 : product === "diesel" ? 7.2 : 6.8;
+    const slack = autoplan ? clamp(dueIn * 0.3, 1.5, 4.5) : 0;
+    const rushFactor = rush ? 0.6 : 1;
+    return clamp((base + slack) * rushFactor, 3.2, 12.5);
+  }
+
+  _registerShipment({ product, dueIn, volume, window, rush = false, autoplan = false }) {
+    if (!product || !Number.isFinite(dueIn) || dueIn <= 0) {
+      return null;
     }
 
-    if (weighted.length === 0) {
-      this.nextShipmentIn = Math.max(this.nextShipmentIn, randomRange(4, 7));
-      return false;
-    }
-
-    const product =
-      weighted[Math.floor(Math.random() * weighted.length)] || fallbackProduct || "gasoline";
-    const capacity = this.storage.capacity[product] || 120;
-    const currentLevel = this.storage.levels[product] || 0;
-    const utilization = capacity ? clamp(currentLevel / capacity, 0, 1.2) : 0;
-    const available = Math.max(0, currentLevel);
-
-    if (available < 18) {
-      this.nextShipmentIn = Math.max(this.nextShipmentIn, randomRange(3, 6));
-      return false;
-    }
-
-    const baseShare = product === "jet" ? 0.24 : product === "diesel" ? 0.28 : 0.32;
-    const urgency = utilization > 1 ? 0.7 : utilization > 0.95 ? 0.5 : utilization > 0.85 ? 0.28 : 0.12;
-    const drawFraction = clamp(0.4 + urgency * 0.5, 0.3, 0.85);
-    const ceiling = capacity * baseShare * (1 + urgency * 0.45);
-    const volume = Math.round(clamp(available * drawFraction, 20, ceiling));
-
-    if (!Number.isFinite(volume) || volume <= 0) {
-      this.nextShipmentIn = Math.max(this.nextShipmentIn, randomRange(4, 6));
-      return false;
-    }
-
-    const baseWindowHours = product === "jet" ? 8.5 : 7.2;
-    const windowMin = baseWindowHours - urgency * 4.2;
-    const windowMax = baseWindowHours + 1.8 - urgency * 2.2;
-    const window = clamp(randomRange(windowMin, windowMax), 4.5, 12);
     const shipment = {
       id: `ship-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
       product,
-      volume,
+      volume: Math.round(Math.max(10, volume || 0)),
       window,
-      dueIn: window,
+      dueIn,
       status: "pending",
       createdAt: this.timeMinutes,
+      scheduledAt: this.timeMinutes + dueIn * 60,
       cooldown: 0,
+      rush: Boolean(rush),
     };
+
     this.shipments.push(shipment);
-    this.pushLog(
-      "info",
-      `${volume.toFixed(0)} kb of ${PRODUCT_LABELS[product]} requested at the marine dock within ${window.toFixed(
-        1
-      )} h.`
-    );
-    return true;
+
+    if (!autoplan || dueIn <= 18 || rush) {
+      const label = PRODUCT_LABELS[product] || product;
+      this.pushLog(
+        "info",
+        `${shipment.volume.toFixed(0)} kb of ${label} slated for the dock within ${window.toFixed(1)} h.`,
+        { product }
+      );
+    }
+
+    this._updateNextShipmentCountdown();
+    return shipment;
+  }
+
+  _ensureScheduledShipments(horizonHours = this.shipmentHorizonHours || SHIPMENT_HORIZON_HOURS) {
+    if (!Array.isArray(this.shipments)) {
+      this.shipments = [];
+    }
+
+    const nowHours = this.timeMinutes / 60;
+    const target = nowHours + Math.max(12, horizonHours || SHIPMENT_HORIZON_HOURS);
+    const pending = this.shipments.filter((shipment) => shipment && shipment.status === "pending");
+    const farthestDue = pending.reduce((max, shipment) => {
+      if (!shipment || !Number.isFinite(shipment.dueIn)) {
+        return max;
+      }
+      return Math.max(max, shipment.dueIn);
+    }, 0);
+    let scheduledThrough = nowHours + farthestDue;
+    const planning = this._prepareShipmentPlanningContext();
+
+    let guard = 0;
+    while (scheduledThrough < target && guard < 32) {
+      const spacing = randomRange(planning.baseSpacing * 0.7, planning.baseSpacing * 1.35);
+      scheduledThrough += Math.max(0.5, spacing);
+      const dueIn = Math.max(0.75, scheduledThrough - nowHours);
+      this._scheduleShipment({ dueIn, autoplan: true, context: planning });
+      guard += 1;
+    }
+
+    this._updateNextShipmentCountdown();
+  }
+
+  _updateNextShipmentCountdown() {
+    if (!Array.isArray(this.shipments) || !this.shipments.length) {
+      this.nextShipmentIn = 0;
+      return;
+    }
+    const pending = this.shipments.filter((shipment) => shipment && shipment.status === "pending");
+    if (!pending.length) {
+      this.nextShipmentIn = 0;
+      return;
+    }
+    const next = pending.reduce((min, shipment) => {
+      if (!shipment || !Number.isFinite(shipment.dueIn)) {
+        return min;
+      }
+      const value = Math.max(0, shipment.dueIn);
+      if (min === null || value < min) {
+        return value;
+      }
+      return min;
+    }, null);
+    this.nextShipmentIn = next ?? 0;
+  }
+
+  _updateOperationalStrain({ hours, crudeThroughputPerDay, scenario }) {
+    const maintenance = clamp(this.params.maintenance ?? 0.65, 0, 1);
+    const safety = clamp(this.params.safety ?? 0.45, 0, 1);
+    const environment = clamp(this.params.environment ?? 0.35, 0, 1);
+    const scenarioPenalty = scenario?.maintenancePenalty || 0;
+
+    const load = clamp(crudeThroughputPerDay / Math.max(20, BASE_CRUDE_THROUGHPUT), 0, 2.5);
+    const stress = load * (1 + scenarioPenalty * 1.2 + (this.marketStress || 0) * 0.6);
+    const mitigation = 0.4 + maintenance * 0.55 + safety * 0.35 + environment * 0.45;
+    const target = clamp((stress - mitigation + 0.2) * 7, 0, 12);
+    const response = clamp(0.18 + maintenance * 0.35 + safety * 0.2, 0.18, 0.78);
+
+    this.operationalStrain += (target - this.operationalStrain) * Math.min(1, hours * response);
+    const relief = (environment * 0.45 + maintenance * 0.15) * hours;
+    this.operationalStrain = clamp(this.operationalStrain - relief, 0, 12);
+
+    const factor = clamp(this.operationalStrain / 12, 0, 1);
+    const penalty = factor * 0.22;
+
+    return { strain: this.operationalStrain, factor, penalty };
   }
 
   _resolveShipment(shipment, prices, report) {
@@ -1523,8 +1773,6 @@ export class RefinerySimulation {
       }
     });
 
-    this.nextShipmentIn -= hours;
-
     let maxRatio = 0;
     Object.keys(this.storage.levels).forEach((product) => {
       const capacity = this.storage.capacity[product] || 0;
@@ -1535,22 +1783,6 @@ export class RefinerySimulation {
     });
 
     this._applyStoragePressure(maxRatio, hours);
-
-    if (maxRatio > 0.82) {
-      this.nextShipmentIn -= hours * (1 + (maxRatio - 0.82) * 6);
-      if (maxRatio > 0.95) {
-        this.nextShipmentIn = Math.min(this.nextShipmentIn, 1.5);
-      }
-    } else if (maxRatio < 0.5) {
-      const relief = 0.45 + (0.5 - maxRatio) * 3.2;
-      this.nextShipmentIn += hours * relief;
-    }
-    this.nextShipmentIn = Math.min(this.nextShipmentIn, 24);
-
-    if (this._countPendingShipments() < 3 && this.nextShipmentIn <= 0) {
-      const scheduled = this._scheduleShipment();
-      this.nextShipmentIn = scheduled ? randomRange(9, 16) : randomRange(5, 9);
-    }
 
     const report = {
       delivered: { gasoline: 0, diesel: 0, jet: 0 },
@@ -1581,6 +1813,12 @@ export class RefinerySimulation {
     this.shipments = this.shipments.filter(
       (shipment) => shipment.status === "pending" || shipment.cooldown > 0
     );
+
+    this._updateNextShipmentCountdown();
+
+    if (this._countPendingShipments() < 8) {
+      this._ensureScheduledShipments();
+    }
 
     const capacityTotal =
       this.storage.capacity.gasoline +
@@ -2095,12 +2333,12 @@ export class RefinerySimulation {
     this.logisticsRushCooldown = 6;
     this._relieveStoragePressure(0.18);
 
-    if (this._countPendingShipments() < 2) {
-      this._scheduleShipment();
-    }
-    if (highestRatio > 0.9) {
-      this._scheduleShipment();
-    }
+    const rushDueIn = Math.min(Math.max(2.5, this.nextShipmentIn || 6), 6.5);
+    this._scheduleShipment({
+      product: targetProduct,
+      dueIn: rushDueIn,
+      rush: true,
+    });
 
     this.pushLog(
       "info",
@@ -2161,34 +2399,33 @@ export class RefinerySimulation {
     const dueIn = Math.max(0.25, randomRange(0.35, 0.9) * (1 - urgency * 0.3));
     const volume = Math.min(level, capacity * clamp(0.12 + urgency * 0.24, 0.12, 0.34));
 
-    const shipment = {
-      id: `rush-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+    const shipment = this._registerShipment({
       product: targetProduct,
       volume,
       window,
       dueIn,
-      status: "pending",
-      createdAt: this.timeMinutes,
-      cooldown: 0,
       rush: true,
-    };
-    this.shipments.push(shipment);
+      autoplan: false,
+    });
+    if (!shipment) {
+      this.pushLog("warning", "Unable to stage emergency charter; scheduling failed.");
+      return false;
+    }
 
     const cost = 420 + volume * 2.4;
     this.pendingOperationalCost += cost;
     this.extraShipmentCooldown = 4;
-    this.nextShipmentIn = Math.min(this.nextShipmentIn, dueIn + window * 0.4);
     this._relieveStoragePressure(0.1);
 
     const label = this._formatProductLabel(targetProduct);
     this.pushLog(
       "info",
-      `Emergency charter staged: ${volume.toFixed(0)} kb of ${label} loading in ~${dueIn.toFixed(
+      `Emergency charter staged: ${volume.toFixed(0)} kb of ${label} loading in ~${shipment.dueIn.toFixed(
         1
       )} h (cost $${cost.toFixed(0)}k).`
     );
 
-    return { product: targetProduct, volume, dueIn, cost };
+    return { product: targetProduct, volume, dueIn: shipment.dueIn, cost };
   }
 
   expandStorageCapacity() {
@@ -3314,6 +3551,9 @@ export class RefinerySimulation {
     } else {
       this.shipmentStats = { total: 0, onTime: 0, missed: 0 };
     }
+
+    this._updateNextShipmentCountdown();
+    this._ensureScheduledShipments(this.shipmentHorizonHours);
 
     this.units.forEach((unit) => {
       unit.throughput = 0;

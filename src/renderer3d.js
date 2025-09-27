@@ -1278,6 +1278,10 @@ export class TileRenderer {
       if (!shipment) {
         return;
       }
+      const dueIn = typeof shipment.dueIn === "number" ? shipment.dueIn : Infinity;
+      if (shipment.status === "pending" && !shipment.rush && dueIn > 18) {
+        return;
+      }
       const ship = this._ensureShip(shipment);
       activeIds.add(ship.id);
       this._stepShip(ship, deltaSeconds, shipment);

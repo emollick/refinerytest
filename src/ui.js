@@ -40,6 +40,7 @@ export class UIController {
       penaltyOutput: document.getElementById("penalty-output"),
       marginOutput: document.getElementById("margin-output"),
       reliabilityOutput: document.getElementById("reliability-output"),
+      strainOutput: document.getElementById("strain-output"),
       carbonOutput: document.getElementById("carbon-output"),
       gasolineFutures: document.getElementById("gasoline-futures"),
       dieselFutures: document.getElementById("diesel-futures"),
@@ -433,6 +434,15 @@ export class UIController {
     }
 
     this.elements.reliabilityOutput.textContent = `${Math.round(metrics.reliability * 100)}%`;
+    if (this.elements.strainOutput) {
+      const strainValue = Number.isFinite(metrics.operationalStrain)
+        ? metrics.operationalStrain
+        : 0;
+      const strainRatio = Math.min(Math.max(strainValue / 12, 0), 1);
+      const strainPct = Math.round(strainRatio * 100);
+      this.elements.strainOutput.textContent = `${strainPct}%`;
+      this.elements.strainOutput.classList.toggle("warning", strainPct >= 65);
+    }
     this.elements.carbonOutput.textContent = `${metrics.carbon.toFixed(1)} tCO₂-eq`;
 
     this._renderEconomy(metrics);
