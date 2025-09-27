@@ -23,7 +23,9 @@ const unitMenu = document.getElementById("unit-menu");
 const importInput = document.getElementById("session-import-input");
 const unitPulseList = document.getElementById("unit-pulse");
 const mapToolbar = document.querySelector(".map-toolbar");
+const recordToolbarButton = mapToolbar?.querySelector('button[data-command="record-demo"]');
 const prototypeNotes = document.getElementById("prototype-notes");
+const speedControls = document.getElementById("speed-controls");
 const gridToggleButton = menuBar?.querySelector('[data-action="view-toggle-grid"]');
 const flowToggleButton = menuBar?.querySelector('[data-action="view-toggle-flow"]');
 const calloutShelf = document.getElementById("alert-callouts");
@@ -227,6 +229,16 @@ const PRESETS = {
   },
 };
 
+function updateRecordButtonState(active) {
+  if (!recordToolbarButton) {
+    return;
+  }
+  const recording = Boolean(active);
+  recordToolbarButton.classList.toggle("active", recording);
+  recordToolbarButton.setAttribute("aria-pressed", recording ? "true" : "false");
+  recordToolbarButton.textContent = recording ? "REC" : "RECORD";
+}
+
 const SESSION_PRESETS = {
   legacy: {
     scenario: "maintenanceCrunch",
@@ -339,6 +351,10 @@ ui.onRunningChange = (running) => {
 
 ui.onReset = () => {
   performSimulationReset();
+  if (typeof ui.clearInspectionReports === "function") {
+    ui.clearInspectionReports();
+  }
+  updateRecordButtonState(false);
 };
 
 applyPreset("auto", { silent: true });
@@ -369,6 +385,24 @@ if (mapToolbar) {
     if (!button) return;
     const command = button.dataset.command;
     handleToolbarCommand(command);
+  });
+}
+
+if (speedControls) {
+  speedControls.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-speed]");
+    if (!button) {
+      return;
+    }
+    const targetSpeed = Number.parseFloat(button.dataset.speed);
+    if (!Number.isFinite(targetSpeed)) {
+      return;
+    }
+    const previous = simulation.getSpeedMultiplier();
+    const multiplier = simulation.setSpeedFromPreset(targetSpeed);
+    if (Math.abs(multiplier - previous) > 0.001) {
+      simulation.pushLog("info", `Time scale set to ${multiplier.toFixed(2)}× baseline.`);
+    }
   });
 }
 
@@ -527,8 +561,13 @@ function animate(now) {
   const delta = (now - clock.last) / 1000;
   clock.last = now;
   simulation.update(delta);
+  const recorderState =
+    typeof simulation.getRecorderState === "function"
+      ? simulation.getRecorderState()
+      : null;
   const logisticsState = simulation.getLogisticsState();
   const flows = simulation.getFlows();
+  updateRecordButtonState(Boolean(recorderState?.active));
   renderer.render(delta, { flows, logistics: logisticsState });
   ui.update(logisticsState, flows);
   refreshUnitPulse(now / 1000);
@@ -690,17 +729,17 @@ function handleMenuAction(action) {
       }
       break;
     case "session-speed-slower": {
-      const multiplier = simulation.adjustSpeedMultiplier(-0.25);
+      const multiplier = simulation.cycleSpeedPreset(-1);
       simulation.pushLog("info", `Time scale set to ${multiplier.toFixed(2)}× baseline.`);
       break;
     }
     case "session-speed-normal": {
-      const multiplier = simulation.setSpeedMultiplier(1);
+      const multiplier = simulation.setSpeedFromPreset(1);
       simulation.pushLog("info", `Time scale reset to ${multiplier.toFixed(2)}× baseline.`);
       break;
     }
     case "session-speed-faster": {
-      const multiplier = simulation.adjustSpeedMultiplier(0.25);
+      const multiplier = simulation.cycleSpeedPreset(1);
       simulation.pushLog("info", `Time scale increased to ${multiplier.toFixed(2)}× baseline.`);
       break;
     }
@@ -1524,30 +1563,47 @@ function setSelectedUnit(unitId) {
 function handleToolbarCommand(command) {
   switch (command) {
     case "record-demo":
-      simulation.pushLog(
-        "info",
-        "Whiteboard recorder placeholder: review the included tutorial playback for orientation."
+      updateRecordButtonState(
+        Boolean(simulation.togglePerformanceRecording()?.active)
       );
       break;
     case "inspection":
-      simulation.pushLog(
-        "info",
-        "Inspection window is mostly blank in the original prototype — guidance comes from the Tour Book."
-      );
+      if (!selectedUnitId) {
+        simulation.performInspection(null);
+        break;
+      }
+      const report = simulation.performInspection(selectedUnitId);
+      if (report) {
+        if (typeof ui.recordInspectionReport === "function") {
+          ui.recordInspectionReport(report);
+        }
+        renderer.focusOnUnit?.(selectedUnitId, { onlyIfVisible: true });
+        highlightPipelinesForUnit(selectedUnitId);
+      }
       break;
-    case "build-road":
-      simulation.dispatchLogisticsConvoy();
+    case "build-road": {
+      const result = simulation.dispatchLogisticsConvoy();
+      if (result?.product && typeof ui.flashStorageLevel === "function") {
+        ui.flashStorageLevel(result.product);
+      }
       break;
+    }
     case "build-pipe": {
       const success = simulation.deployPipelineBypass(selectedUnitId);
       if (success && selectedUnitId) {
         highlightPipelinesForUnit(selectedUnitId);
+        renderer.focusOnUnit?.(selectedUnitId, { onlyIfVisible: true });
       }
       break;
     }
-    case "bulldoze":
-      simulation.scheduleTurnaround(selectedUnitId);
+    case "bulldoze": {
+      const scheduled = simulation.scheduleTurnaround(selectedUnitId);
+      if (scheduled && selectedUnitId) {
+        ui.selectUnit(selectedUnitId);
+        renderer.focusOnUnit?.(selectedUnitId, { onlyIfVisible: false });
+      }
       break;
+    }
     default:
       break;
   }

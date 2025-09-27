@@ -150,7 +150,12 @@
         <section class="window edit-window" aria-label="SimRefinery edit and monitoring window">
           <header class="window-title">
             <span>SimRefinery Edit</span>
-            <span id="mode-badge" class="mode-badge">AUTO</span>
+            <div class="window-badges">
+              <span id="mode-badge" class="mode-badge">AUTO</span>
+              <span id="record-indicator" class="record-indicator" hidden aria-live="polite"
+                >REC</span
+              >
+            </div>
           </header>
           <div class="window-body">
             <div class="edit-grid">
@@ -190,6 +195,16 @@
                   <label for="scenario-select">Scenario</label>
                   <select id="scenario-select" aria-describedby="scenario-description"></select>
                   <p id="scenario-description" class="help-text"></p>
+                </div>
+                <div class="control-group speed-group">
+                  <label id="speed-label" for="speed-controls">Time Scale</label>
+                  <div id="speed-controls" class="speed-buttons" role="group" aria-labelledby="speed-label">
+                    <button type="button" class="speed-button" data-speed="0.5">0.5x</button>
+                    <button type="button" class="speed-button" data-speed="1">1x</button>
+                    <button type="button" class="speed-button" data-speed="2">2x</button>
+                    <button type="button" class="speed-button" data-speed="4">4x</button>
+                  </div>
+                  <p id="speed-readout" class="help-text" aria-live="polite"></p>
                 </div>
               </section>
 

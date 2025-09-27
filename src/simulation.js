@@ -18,6 +18,13 @@ export class RefinerySimulation {
     this.minSpeedMultiplier = 0.25;
     this.maxSpeedMultiplier = 4;
     this.speed = this.baseSpeed * this.speedMultiplier;
+    this.speedPresets = [
+      { label: "0.25x", value: 0.25 },
+      { label: "0.5x", value: 0.5 },
+      { label: "1x", value: 1 },
+      { label: "2x", value: 2 },
+      { label: "4x", value: 4 },
+    ];
     this._accumulator = 0;
     this.running = true;
     this.stepOnce = false;
@@ -108,6 +115,9 @@ export class RefinerySimulation {
       "info",
       "Simulation initialized. Adjust the sliders to explore the refinery."
     );
+
+    this.recorder = this._createRecorderState();
+    this.lastRecordingSummary = null;
   }
 
   _createScenarios() {
@@ -340,6 +350,41 @@ export class RefinerySimulation {
     return this.speedMultiplier;
   }
 
+  getSpeedState() {
+    return {
+      multiplier: this.speedMultiplier,
+      min: this.minSpeedMultiplier,
+      max: this.maxSpeedMultiplier,
+      baseMinutesPerSecond: this.baseSpeed,
+      minutesPerSecond: this.speed,
+      presets: this.speedPresets.map((entry) => ({ ...entry })),
+    };
+  }
+
+  cycleSpeedPreset(direction = 1) {
+    if (!Array.isArray(this.speedPresets) || this.speedPresets.length === 0) {
+      return this.speedMultiplier;
+    }
+    const sorted = [...this.speedPresets].sort((a, b) => a.value - b.value);
+    const currentValue = this.speedMultiplier;
+    let index = sorted.findIndex((entry) => Math.abs(entry.value - currentValue) < 1e-3);
+    if (index === -1) {
+      index = sorted.findIndex((entry) => entry.value > currentValue);
+      if (index === -1) {
+        index = sorted.length - 1;
+      }
+    }
+    const nextIndex = clamp(index + Math.sign(direction || 1), 0, sorted.length - 1);
+    return this.setSpeedMultiplier(sorted[nextIndex].value);
+  }
+
+  setSpeedFromPreset(value) {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return this.speedMultiplier;
+    }
+    return this.setSpeedMultiplier(value);
+  }
+
   setSpeedMultiplier(multiplier) {
     const value = typeof multiplier === "number" && Number.isFinite(multiplier) ? multiplier : 1;
     const clamped = clamp(value, this.minSpeedMultiplier, this.maxSpeedMultiplier);
@@ -457,6 +502,8 @@ export class RefinerySimulation {
     this.performanceHistory = [];
     this.market = this._initMarketState();
     this.logs = [];
+    this.recorder = this._createRecorderState();
+    this.lastRecordingSummary = null;
     this.pushLog(
       "info",
       "Simulation reset. Systems stabilized at baseline steady-state."
@@ -843,6 +890,17 @@ export class RefinerySimulation {
       jet: this.metrics.jet,
       shipmentScore: this.metrics.shipmentReliability,
       directiveScore: this.metrics.directiveReliability,
+    });
+
+    this._updateRecorder({
+      hours,
+      production: result,
+      profitPerHour,
+      penalty,
+      incidents: incidentsRisk.incidents,
+      reliability: this.metrics.reliability,
+      carbon: this.metrics.carbon,
+      logistics: logisticsReport,
     });
 
     this._updateAlerts(deltaMinutes);
@@ -1466,6 +1524,60 @@ export class RefinerySimulation {
     return report;
   }
 
+  _updateRecorder(context) {
+    if (!this.recorder?.active) {
+      return;
+    }
+
+    const hours = Math.max(0, context?.hours || 0);
+    if (hours <= 0) {
+      return;
+    }
+
+    this.recorder.elapsedHours += hours;
+    this.recorder.lastUpdatedAt = this.timeMinutes;
+
+    const production = context?.production || {};
+    const produced = {
+      gasoline: Math.max(0, (production.gasoline || 0) * hours),
+      diesel: Math.max(0, (production.diesel || 0) * hours),
+      jet: Math.max(0, (production.jet || 0) * hours),
+    };
+    Object.entries(produced).forEach(([product, volume]) => {
+      this.recorder.production[product] += volume;
+    });
+
+    const profitPerHour = Number.isFinite(context?.profitPerHour) ? context.profitPerHour : 0;
+    this.recorder.profit += profitPerHour * hours;
+
+    if (Number.isFinite(context?.penalty)) {
+      this.recorder.penalty += Math.max(0, context.penalty);
+    }
+
+    if (Number.isFinite(context?.incidents)) {
+      this.recorder.incidents += Math.max(0, context.incidents);
+    }
+
+    const reliability = Number.isFinite(context?.reliability)
+      ? context.reliability
+      : Number.isFinite(this.metrics.reliability)
+      ? this.metrics.reliability
+      : 0;
+    this.recorder.reliabilityHours += Math.max(0, reliability) * hours;
+
+    if (Number.isFinite(context?.carbon)) {
+      this.recorder.carbon += Math.max(0, context.carbon) * hours;
+    }
+
+    const logistics = context?.logistics || {};
+    const delivered = logistics.delivered || {};
+    this.recorder.shipments.delivered +=
+      (delivered.gasoline || 0) + (delivered.diesel || 0) + (delivered.jet || 0);
+    if (Number.isFinite(logistics.failed)) {
+      this.recorder.shipments.missed += Math.max(0, logistics.failed);
+    }
+  }
+
   _updateEconomy({
     scenario,
     spotPrices,
@@ -1770,6 +1882,21 @@ export class RefinerySimulation {
       .join(" ");
   }
 
+  _createRecorderState() {
+    return {
+      active: false,
+      startedAt: 0,
+      elapsedHours: 0,
+      production: { gasoline: 0, diesel: 0, jet: 0 },
+      profit: 0,
+      penalty: 0,
+      incidents: 0,
+      reliabilityHours: 0,
+      carbon: 0,
+      shipments: { delivered: 0, missed: 0 },
+    };
+  }
+
   dispatchLogisticsConvoy() {
     if (this.logisticsRushCooldown > 0.1) {
       const waitHours = Math.max(1, Math.round(this.logisticsRushCooldown));
@@ -1834,6 +1961,100 @@ export class RefinerySimulation {
       { product: targetProduct }
     );
     return { product: targetProduct, volume: relief };
+  }
+
+  togglePerformanceRecording() {
+    if (this.recorder?.active) {
+      const summary = this._summarizeRecorderState();
+      this.lastRecordingSummary = summary ? { ...summary } : null;
+      this.recorder = this._createRecorderState();
+
+      if (summary) {
+        const duration = summary.durationHours || 0;
+        const totalVolume =
+          (summary.production.gasoline || 0) +
+          (summary.production.diesel || 0) +
+          (summary.production.jet || 0);
+        const netProfit = summary.netProfit ?? summary.profit - summary.penalty;
+        const reliabilityPct = Math.round((summary.avgReliability || 0) * 100);
+        const missed = summary.shipments?.missed || 0;
+        const level = missed > 0 ? (missed > 1 ? "warning" : "info") : "info";
+        const profitLabel = `${netProfit >= 0 ? "+" : "-"}$${Math.abs(netProfit).toFixed(1)}M`;
+        const message =
+          `Recording stopped after ${duration.toFixed(1)} h — ${totalVolume.toFixed(0)} kb shipped, ` +
+          `${profitLabel} net, reliability ${reliabilityPct}%.`;
+        this.pushLog(level, message, { recording: summary });
+      } else {
+        this.pushLog("info", "Shift recorder cleared.");
+      }
+
+      return { active: false, summary };
+    }
+
+    this.recorder = this._createRecorderState();
+    this.recorder.active = true;
+    this.recorder.startedAt = this.timeMinutes;
+    this.recorder.lastUpdatedAt = this.timeMinutes;
+    this.pushLog("info", "Shift recorder armed — capturing performance snapshot.");
+    return { active: true, summary: null };
+  }
+
+  getRecorderState() {
+    const recorder = this.recorder || this._createRecorderState();
+    return {
+      active: Boolean(recorder.active),
+      startedAt: recorder.startedAt || null,
+      elapsedHours: recorder.elapsedHours || 0,
+      lastUpdatedAt: recorder.lastUpdatedAt || null,
+      production: { ...recorder.production },
+      profit: recorder.profit || 0,
+      penalty: recorder.penalty || 0,
+      incidents: recorder.incidents || 0,
+      shipments: { ...recorder.shipments },
+      avgReliability:
+        recorder.elapsedHours > 0
+          ? recorder.reliabilityHours / recorder.elapsedHours
+          : this.metrics.reliability || 0,
+      carbonPerHour:
+        recorder.elapsedHours > 0 ? recorder.carbon / recorder.elapsedHours : this.metrics.carbon || 0,
+      lastSummary: this.lastRecordingSummary ? { ...this.lastRecordingSummary } : null,
+    };
+  }
+
+  _summarizeRecorderState() {
+    if (!this.recorder) {
+      return null;
+    }
+    const duration = this.recorder.elapsedHours || 0;
+    const avgReliability =
+      duration > 0
+        ? this.recorder.reliabilityHours / duration
+        : Number.isFinite(this.metrics.reliability)
+        ? this.metrics.reliability
+        : 0;
+    const production = {
+      gasoline: this.recorder.production.gasoline || 0,
+      diesel: this.recorder.production.diesel || 0,
+      jet: this.recorder.production.jet || 0,
+    };
+    const summary = {
+      startedAt: this.recorder.startedAt || this.timeMinutes,
+      endedAt: this.timeMinutes,
+      durationHours: duration,
+      production,
+      profit: this.recorder.profit || 0,
+      penalty: this.recorder.penalty || 0,
+      netProfit: (this.recorder.profit || 0) - (this.recorder.penalty || 0),
+      incidents: this.recorder.incidents || 0,
+      avgReliability,
+      carbonPerHour:
+        duration > 0 ? (this.recorder.carbon || 0) / duration : this.metrics.carbon || 0,
+      shipments: {
+        delivered: this.recorder.shipments.delivered || 0,
+        missed: this.recorder.shipments.missed || 0,
+      },
+    };
+    return summary;
   }
 
   deployPipelineBypass(targetUnitId) {
@@ -1920,6 +2141,101 @@ export class RefinerySimulation {
       { unitId }
     );
     return true;
+  }
+
+  performInspection(unitId) {
+    if (!unitId) {
+      this.pushLog("info", "Select a processing unit to inspect.");
+      return null;
+    }
+    const unit = this.unitMap[unitId];
+    if (!unit) {
+      this.pushLog("info", "Unable to find that unit on the board.");
+      return null;
+    }
+
+    const report = this._buildInspectionReport(unit);
+    const level = report.severity === "danger" ? "danger" : report.severity === "warning" ? "warning" : "info";
+    this.pushLog(level, `${unit.name} inspection: ${report.summary}`, { unitId, inspection: report });
+    return report;
+  }
+
+  _buildInspectionReport(unit) {
+    const integrity = clamp(unit.integrity ?? 1, 0, 1);
+    const utilization = clamp(unit.utilization ?? 0, 0, 1.5);
+    const downtime = Math.max(0, unit.downtime || 0);
+    const incidents = Math.max(0, unit.incidents || 0);
+    const alert = unit.alert || null;
+
+    let severityScore = 0;
+    if (alert === "warning") {
+      severityScore = Math.max(severityScore, 1);
+    } else if (alert === "danger") {
+      severityScore = Math.max(severityScore, 2);
+    }
+    if (integrity < 0.35) {
+      severityScore = Math.max(severityScore, 2);
+    } else if (integrity < 0.6) {
+      severityScore = Math.max(severityScore, 1);
+    }
+    if (downtime > 0) {
+      severityScore = Math.max(severityScore, 1);
+    }
+
+    const findings = [];
+    if (downtime > 0) {
+      findings.push(`Offline for ${Math.round(downtime)} minutes of maintenance.`);
+    } else {
+      const loadPct = Math.round(utilization * 100);
+      if (loadPct > 110) {
+        findings.push(`Running hot at ${loadPct}% of rated capacity.`);
+        severityScore = Math.max(severityScore, 1);
+      } else if (loadPct < 45) {
+        findings.push(`Coasting at ${loadPct}% utilization; spare capacity available.`);
+      }
+    }
+
+    const integrityPct = Math.round(integrity * 100);
+    if (integrityPct < 40) {
+      findings.push(`Integrity degraded to ${integrityPct}% — immediate turnaround recommended.`);
+    } else if (integrityPct < 65) {
+      findings.push(`Integrity drifting low at ${integrityPct}%.`);
+    } else {
+      findings.push(`Mechanical integrity steady at ${integrityPct}%.`);
+    }
+
+    if (incidents > 0) {
+      findings.push(`Logged ${incidents} incident${incidents === 1 ? "" : "s"} this shift.`);
+      severityScore = Math.max(severityScore, incidents > 1 ? 2 : 1);
+    }
+
+    const recommendations = [];
+    if (integrity < 0.55) {
+      recommendations.push("Increase maintenance allocation or schedule a turnaround soon.");
+    }
+    if (utilization > 1.05) {
+      recommendations.push("Trim feed rates or deploy a bypass to relieve the unit.");
+    }
+    if (!recommendations.length) {
+      recommendations.push("Keep monitoring — no urgent actions flagged.");
+    }
+
+    const severity = severityScore >= 2 ? "danger" : severityScore === 1 ? "warning" : "info";
+    const summary = findings[0] || "Unit operating within expected range.";
+
+    return {
+      unitId: unit.id,
+      unitName: unit.name,
+      severity,
+      integrity,
+      utilization,
+      incidents,
+      downtime,
+      summary,
+      findings,
+      recommendations,
+      timestamp: this._formatTime(),
+    };
   }
 
   _seedDirectives() {
@@ -2214,6 +2530,8 @@ export class RefinerySimulation {
       },
       shipments: this.shipments.map((shipment) => ({ ...shipment })),
       stats: { ...this.shipmentStats },
+      convoyCooldown: this.logisticsRushCooldown,
+      nextShipmentIn: Math.max(0, this.nextShipmentIn),
       alerts: this.getStorageAlerts(),
     };
   }
@@ -2380,6 +2698,8 @@ export class RefinerySimulation {
       pipelineBoosts: clone(this.pipelineBoosts),
       unitOverrides: this.getUnitOverrides(),
       units,
+      recorder: this.getRecorderState(),
+      lastRecordingSummary: this.lastRecordingSummary ? { ...this.lastRecordingSummary } : null,
       directives: this.directives.map((directive) => ({ ...directive })),
       directiveStats: { ...this.directiveStats },
       performanceHistory: this.performanceHistory.map((entry) => ({ ...entry })),
@@ -2533,6 +2853,68 @@ export class RefinerySimulation {
       typeof snapshot.nextShipmentIn === "number" && Number.isFinite(snapshot.nextShipmentIn)
         ? Math.max(0, snapshot.nextShipmentIn)
         : this.nextShipmentIn;
+
+    if (snapshot.recorder && typeof snapshot.recorder === "object") {
+      const restored = this._createRecorderState();
+      restored.active = Boolean(snapshot.recorder.active);
+      restored.startedAt =
+        typeof snapshot.recorder.startedAt === "number" && Number.isFinite(snapshot.recorder.startedAt)
+          ? snapshot.recorder.startedAt
+          : 0;
+      restored.elapsedHours =
+        typeof snapshot.recorder.elapsedHours === "number" && Number.isFinite(snapshot.recorder.elapsedHours)
+          ? Math.max(0, snapshot.recorder.elapsedHours)
+          : 0;
+      restored.lastUpdatedAt =
+        typeof snapshot.recorder.lastUpdatedAt === "number" && Number.isFinite(snapshot.recorder.lastUpdatedAt)
+          ? snapshot.recorder.lastUpdatedAt
+          : null;
+      restored.profit =
+        typeof snapshot.recorder.profit === "number" && Number.isFinite(snapshot.recorder.profit)
+          ? snapshot.recorder.profit
+          : 0;
+      restored.penalty =
+        typeof snapshot.recorder.penalty === "number" && Number.isFinite(snapshot.recorder.penalty)
+          ? Math.max(0, snapshot.recorder.penalty)
+          : 0;
+      restored.incidents =
+        typeof snapshot.recorder.incidents === "number" && Number.isFinite(snapshot.recorder.incidents)
+          ? Math.max(0, snapshot.recorder.incidents)
+          : 0;
+      restored.reliabilityHours =
+        typeof snapshot.recorder.reliabilityHours === "number" && Number.isFinite(snapshot.recorder.reliabilityHours)
+          ? Math.max(0, snapshot.recorder.reliabilityHours)
+          : 0;
+      restored.carbon =
+        typeof snapshot.recorder.carbon === "number" && Number.isFinite(snapshot.recorder.carbon)
+          ? Math.max(0, snapshot.recorder.carbon)
+          : 0;
+      if (snapshot.recorder.production && typeof snapshot.recorder.production === "object") {
+        ["gasoline", "diesel", "jet"].forEach((product) => {
+          const value = snapshot.recorder.production[product];
+          if (typeof value === "number" && Number.isFinite(value)) {
+            restored.production[product] = Math.max(0, value);
+          }
+        });
+      }
+      if (snapshot.recorder.shipments && typeof snapshot.recorder.shipments === "object") {
+        const delivered = snapshot.recorder.shipments.delivered;
+        const missed = snapshot.recorder.shipments.missed;
+        restored.shipments.delivered =
+          typeof delivered === "number" && Number.isFinite(delivered) ? Math.max(0, delivered) : 0;
+        restored.shipments.missed =
+          typeof missed === "number" && Number.isFinite(missed) ? Math.max(0, missed) : 0;
+      }
+      this.recorder = restored;
+    } else {
+      this.recorder = this._createRecorderState();
+    }
+
+    if (snapshot.lastRecordingSummary && typeof snapshot.lastRecordingSummary === "object") {
+      this.lastRecordingSummary = { ...snapshot.lastRecordingSummary };
+    } else {
+      this.lastRecordingSummary = null;
+    }
 
     if (typeof snapshot.emergencyShutdown === "boolean") {
       this.emergencyShutdown = snapshot.emergencyShutdown;

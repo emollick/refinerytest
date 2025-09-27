@@ -198,6 +198,32 @@ body {
   border-bottom: 1px solid rgba(0, 0, 0, 0.35);
 }
 
+.window-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.record-indicator {
+  font-family: "Inconsolata", monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #8c1a1a;
+  background: linear-gradient(#f35b5b, #ab1919);
+  color: #fdfdfd;
+  text-transform: uppercase;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 0 6px rgba(255, 64, 64, 0.35);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.record-indicator.active {
+  animation: recordPulse 1.2s ease-in-out infinite;
+}
+
 .window-clock {
   font-weight: 400;
   font-size: 0.75rem;
@@ -1152,6 +1178,29 @@ body {
   }
 }
 
+@keyframes recordPulse {
+  0% {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 0 4px rgba(255, 96, 96, 0.3);
+    opacity: 0.85;
+  }
+  100% {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65), 0 0 9px rgba(255, 32, 32, 0.6);
+    opacity: 1;
+  }
+}
+
+@keyframes storageFlash {
+  0% {
+    filter: brightness(1.2);
+  }
+  50% {
+    filter: brightness(1.6);
+  }
+  100% {
+    filter: brightness(1.2);
+  }
+}
+
 .edit-window {
   flex: 1 1 340px;
   min-width: 320px;
@@ -1244,6 +1293,54 @@ body {
   margin: 0;
   font-size: 0.7rem;
   color: rgba(34, 34, 34, 0.8);
+}
+
+.speed-group {
+  margin-top: 12px;
+}
+
+.speed-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 4px;
+}
+
+.speed-button {
+  font-family: "Inconsolata", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  padding: 4px 12px;
+  border: 2px solid #ffffff;
+  border-bottom-color: #6b6b6b;
+  border-right-color: #6b6b6b;
+  background: linear-gradient(#f3f3f3, #cfcfcf);
+  color: #1e1e1e;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.speed-button:hover {
+  background: linear-gradient(#fafafa, #dcdcdc);
+}
+
+.speed-button:focus-visible {
+  outline: 1px dotted #000;
+  outline-offset: 2px;
+}
+
+.speed-button:active {
+  transform: translateY(1px);
+  background: linear-gradient(#d5d5d5, #f1f1f1);
+}
+
+.speed-button.active {
+  background: linear-gradient(#395f94, #274266);
+  border-color: #fffbea;
+  border-bottom-color: #1c2b46;
+  border-right-color: #1c2b46;
+  color: #f5f9ff;
 }
 
 .control-row.buttons {
@@ -1482,6 +1579,73 @@ body {
   font-size: 0.8rem;
   margin-bottom: 8px;
   color: #2c2c2c;
+}
+
+.unit-inspection {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgba(42, 75, 118, 0.38);
+  background: rgba(211, 226, 245, 0.65);
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.inspection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.inspection-badge {
+  font-family: "Inconsolata", monospace;
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(34, 94, 152, 0.9);
+  color: #f9fbff;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.inspection-badge.warning {
+  background: rgba(210, 144, 38, 0.92);
+}
+
+.inspection-badge.danger {
+  background: rgba(186, 49, 49, 0.95);
+}
+
+.inspection-timestamp {
+  font-size: 0.68rem;
+  color: rgba(20, 32, 48, 0.72);
+  font-family: "Inconsolata", monospace;
+}
+
+.inspection-summary {
+  margin: 0 0 6px;
+  font-weight: 600;
+  color: #1f2e44;
+}
+
+.inspection-findings,
+.inspection-recommendations {
+  margin: 0 0 4px 16px;
+  padding: 0;
+  list-style: square;
+}
+
+.inspection-findings li,
+.inspection-recommendations li {
+  margin: 0 0 2px;
+  line-height: 1.3;
+}
+
+.inspection-label {
+  margin: 6px 0 2px;
+  font-weight: 600;
+  color: #1f2e44;
 }
 
 .unit-stats {
@@ -1874,6 +2038,10 @@ body {
 
 .inventory-fill.over {
   background: linear-gradient(90deg, #ffad4a, #ff6f3c);
+}
+
+.inventory-fill.flash {
+  animation: storageFlash 0.6s ease-in-out 2;
 }
 
 .shipment-header {

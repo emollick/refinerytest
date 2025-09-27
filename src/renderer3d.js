@@ -7,6 +7,13 @@ const DEFAULT_OPTIONS = {
   interactionEnabled: true,
 };
 
+const SHIP_COLORS = {
+  gasoline: 0xffa552,
+  diesel: 0x7ed37e,
+  jet: 0x6fc7ff,
+};
+const DEFAULT_SHIP_COLOR = 0x8ba7d6;
+
 const PALETTES = [
   {
     name: "Twilight",
@@ -66,6 +73,12 @@ export class TileRenderer {
     this.selectedUnitId = null;
     this.time = 0;
     this.selectionPulse = 0;
+    this.shipLane = null;
+    this.shipLayer = null;
+    this.shipMeshes = new Map();
+    this.waterMesh = null;
+    this.dockMesh = null;
+    this.dockLight = null;
 
     this.deviceScaleX = 1;
     this.deviceScaleY = 1;
@@ -209,6 +222,8 @@ export class TileRenderer {
       tank.fill.material.emissiveIntensity = emissiveIntensity;
       tank.label.material.opacity = 0.75 + ratio * 0.25;
     }
+
+    this._updateShips(deltaSeconds, logistics);
 
     for (const [pipelineId, pipeline] of this.pipelineMeshes.entries()) {
       const metricValue = flows[pipeline.metric] || 0;
@@ -441,6 +456,7 @@ export class TileRenderer {
     this._createUnits();
     this._createPipelines();
     this._createStorage();
+    this._createLogisticsZone();
   }
 
   _createUnits() {
@@ -633,6 +649,312 @@ export class TileRenderer {
     }
   }
 
+  _createLogisticsZone() {
+    const exportPipeline = this.pipelineDefs?.find((pipe) => pipe.id === "toExport");
+    const lastPoint = exportPipeline?.path?.[exportPipeline.path.length - 1];
+    const dockTileX = lastPoint?.x ?? this.mapBounds.maxX + 1.6;
+    const dockTileY = lastPoint?.y ?? this.mapBounds.minY + this.mapSpan.height * 0.72;
+
+    const waterLength = this.tileScale * 14;
+    const waterWidth = this.tileScale * 6.2;
+    const waterGeometry = new THREE.PlaneGeometry(waterLength, waterWidth, 1, 1);
+    const waterMaterial = new THREE.MeshStandardMaterial({
+      color: 0x162b3d,
+      transparent: true,
+      opacity: 0.74,
+      metalness: 0.08,
+      roughness: 0.62,
+    });
+    const water = new THREE.Mesh(waterGeometry, waterMaterial);
+    water.rotation.x = -Math.PI / 2;
+    const waterWorld = this._tileToWorld(dockTileX + 6.5, dockTileY - 0.55, 0);
+    water.position.copy(waterWorld);
+    water.position.y = 0.02;
+    this.scene.add(water);
+    this.waterMesh = water;
+
+    const dockGeometry = new THREE.BoxGeometry(this.tileScale * 4.6, 0.6, this.tileScale * 1.8);
+    const dockMaterial = new THREE.MeshStandardMaterial({
+      color: 0x6c7682,
+      metalness: 0.12,
+      roughness: 0.74,
+    });
+    const dock = new THREE.Mesh(dockGeometry, dockMaterial);
+    const dockWorld = this._tileToWorld(dockTileX + 1.2, dockTileY - 0.45, 0);
+    dock.position.copy(dockWorld);
+    dock.position.y = 0.32;
+    this.scene.add(dock);
+    this.dockMesh = dock;
+
+    const bollardGeometry = new THREE.CylinderGeometry(0.25, 0.32, 1.2, 10);
+    const bollardMaterial = new THREE.MeshStandardMaterial({ color: 0xf1f3f6, metalness: 0.32, roughness: 0.38 });
+    const bollardOffsets = [-1.1, 0, 1.1];
+    bollardOffsets.forEach((offset) => {
+      const bollard = new THREE.Mesh(bollardGeometry, bollardMaterial);
+      bollard.position.set(dockWorld.x + offset * this.tileScale * 0.35, 0.9, dockWorld.z + this.tileScale * 0.72);
+      this.scene.add(bollard);
+    });
+
+    const dockLight = new THREE.PointLight(0x9ac9ff, 0.5, 42, 2.2);
+    dockLight.position.set(dockWorld.x - this.tileScale * 0.6, 4.2, dockWorld.z + this.tileScale * 0.2);
+    this.scene.add(dockLight);
+    this.dockLight = dockLight;
+
+    const approach = this._tileToWorld(dockTileX + 8.4, dockTileY - 0.5, 0.16);
+    const dockPosition = this._tileToWorld(dockTileX + 1.5, dockTileY - 0.5, 0.16);
+    const depart = this._tileToWorld(dockTileX + 13.8, dockTileY - 0.7, 0.16);
+
+    const dockDirection = dockPosition.clone().sub(approach).setY(0).normalize();
+    const departDirection = depart.clone().sub(dockPosition).setY(0).normalize();
+    if (dockDirection.lengthSq() === 0) {
+      dockDirection.set(1, 0, 0);
+    }
+    if (departDirection.lengthSq() === 0) {
+      departDirection.copy(dockDirection);
+    }
+
+    this.shipLane = {
+      approach,
+      dock: dockPosition,
+      depart,
+      dockDirection,
+      departDirection,
+      surfaceY: dockPosition.y + 0.02,
+    };
+
+    this.shipLayer = new THREE.Group();
+    this.scene.add(this.shipLayer);
+  }
+
+  _updateShips(deltaSeconds, logistics = {}) {
+    if (!this.shipLane) {
+      return;
+    }
+    const shipments = Array.isArray(logistics.shipments) ? logistics.shipments : [];
+    const activeIds = new Set();
+
+    shipments.forEach((shipment) => {
+      if (!shipment) {
+        return;
+      }
+      const ship = this._ensureShip(shipment);
+      activeIds.add(ship.id);
+      this._stepShip(ship, deltaSeconds, shipment);
+    });
+
+    for (const [id, ship] of [...this.shipMeshes.entries()]) {
+      if (!activeIds.has(id)) {
+        this._retireShip(ship, deltaSeconds);
+      }
+    }
+  }
+
+  _ensureShip(shipment) {
+    const id = shipment.id || `${shipment.product || "cargo"}-${shipment.createdAt || Date.now()}`;
+    let ship = this.shipMeshes.get(id);
+    if (ship) {
+      ship.product = shipment.product || ship.product;
+      return ship;
+    }
+    ship = this._createShip(shipment, id);
+    this.shipMeshes.set(id, ship);
+    return ship;
+  }
+
+  _createShip(shipment, id) {
+    const group = new THREE.Group();
+    const baseColorHex = SHIP_COLORS[shipment.product] || DEFAULT_SHIP_COLOR;
+    const baseColor = new THREE.Color(baseColorHex);
+
+    const hullLength = this.tileScale * 1.6;
+    const hullWidth = this.tileScale * 0.5;
+    const hullHeight = 0.72;
+
+    const hullGeometry = new THREE.BoxGeometry(hullLength, hullHeight, hullWidth);
+    const hullMaterial = new THREE.MeshStandardMaterial({
+      color: baseColor.clone().multiplyScalar(0.85),
+      metalness: 0.2,
+      roughness: 0.45,
+    });
+    const hull = new THREE.Mesh(hullGeometry, hullMaterial);
+    hull.position.y = hullHeight / 2;
+    group.add(hull);
+
+    const deckHeight = hullHeight * 0.35;
+    const deckGeometry = new THREE.BoxGeometry(hullLength * 0.88, deckHeight, hullWidth * 0.92);
+    const deckMaterial = new THREE.MeshStandardMaterial({
+      color: baseColor.clone().lerp(new THREE.Color(0xf7f9fc), 0.45),
+      metalness: 0.08,
+      roughness: 0.38,
+    });
+    const deck = new THREE.Mesh(deckGeometry, deckMaterial);
+    deck.position.y = hullHeight + deckHeight / 2 - 0.02;
+    group.add(deck);
+
+    const bridgeHeight = hullHeight * 0.55;
+    const bridgeGeometry = new THREE.BoxGeometry(hullLength * 0.32, bridgeHeight, hullWidth * 0.6);
+    const bridgeMaterial = new THREE.MeshStandardMaterial({
+      color: 0xf0f4f8,
+      metalness: 0.05,
+      roughness: 0.32,
+    });
+    const bridge = new THREE.Mesh(bridgeGeometry, bridgeMaterial);
+    bridge.position.set(-hullLength * 0.18, hullHeight + bridgeHeight / 2, 0);
+    group.add(bridge);
+
+    const mastGeometry = new THREE.CylinderGeometry(0.14, 0.18, hullHeight * 0.9, 12);
+    const mastMaterial = new THREE.MeshStandardMaterial({ color: 0xfdfdfd, metalness: 0.12, roughness: 0.3 });
+    const mast = new THREE.Mesh(mastGeometry, mastMaterial);
+    mast.position.set(hullLength * 0.25, hullHeight + deckHeight + hullHeight * 0.25, 0);
+    group.add(mast);
+
+    const navLight = new THREE.PointLight(baseColor.clone().lerp(new THREE.Color(0xffffff), 0.35), 0.45, 38, 2.2);
+    navLight.position.set(hullLength * 0.32, hullHeight + bridgeHeight + 0.4, 0);
+    group.add(navLight);
+
+    const labelText = (shipment.product || "cargo").toUpperCase();
+    const label = createLabelSprite(labelText);
+    label.scale.set(12, 3, 1);
+    label.position.set(0, hullHeight + bridgeHeight + 1.2, 0);
+    group.add(label);
+
+    const initialPosition = this.shipLane?.approach.clone() || new THREE.Vector3();
+    group.position.copy(initialPosition);
+    group.position.y = (this.shipLane?.surfaceY ?? 0.04) + 0.02;
+
+    this.shipLayer?.add(group);
+
+    const window = Math.max(0.1, shipment.window || 1);
+    const dueIn = Math.max(0, shipment.dueIn || 0);
+    const status = shipment.status || "pending";
+    const initialProgress =
+      status === "pending"
+        ? clamp(1 - dueIn / window, 0, 1) * 0.94
+        : 1 + clamp(1 - (shipment.cooldown || 0) / Math.max(shipment.cooldown || 0.01, 0.01), 0, 1);
+
+    return {
+      id,
+      product: shipment.product || "cargo",
+      group,
+      hull,
+      deck,
+      bridge,
+      mast,
+      light: navLight,
+      label,
+      baseColor,
+      status,
+      progress: clamp(initialProgress, 0, 1.8),
+      targetProgress: clamp(initialProgress, 0, 1.8),
+      bobPhase: Math.random() * Math.PI * 2,
+      cooldownOrigin: shipment.cooldown || 0,
+      retireTimer: 0,
+    };
+  }
+
+  _stepShip(ship, deltaSeconds, shipment) {
+    const status = shipment.status || "pending";
+    if (ship.status !== status) {
+      ship.status = status;
+      if (status !== "pending") {
+        ship.cooldownOrigin = shipment.cooldown || ship.cooldownOrigin || 0;
+      }
+    }
+
+    ship.bobPhase += deltaSeconds * 1.35;
+    const bob = Math.sin(ship.bobPhase) * 0.16;
+
+    if (status === "pending") {
+      const window = Math.max(0.1, shipment.window || 1);
+      const dueIn = Math.max(0, shipment.dueIn || 0);
+      ship.targetProgress = clamp(1 - dueIn / window, 0, 1);
+    } else {
+      const origin = ship.cooldownOrigin || shipment.cooldown || 0.01;
+      const remaining = Math.max(0, shipment.cooldown || 0);
+      const departProgress = origin > 0 ? clamp(1 - remaining / origin, 0, 1) : 1;
+      ship.targetProgress = 1 + departProgress;
+    }
+
+    ship.progress += (ship.targetProgress - ship.progress) * Math.min(1, deltaSeconds * 2.4);
+    ship.progress = clamp(ship.progress, 0, 2.2);
+
+    const colorTarget =
+      status === "missed"
+        ? new THREE.Color(0xb34b4b)
+        : status === "completed"
+        ? ship.baseColor.clone().lerp(new THREE.Color(0xffffff), 0.15)
+        : ship.baseColor;
+    ship.hull.material.color.lerp(colorTarget, clamp(deltaSeconds * 2.5, 0, 1));
+    ship.light.intensity = status === "missed" ? 0.3 : status === "pending" ? 0.5 : 0.38;
+
+    this._positionShip(ship, ship.progress, bob);
+    ship.retireTimer = 0;
+  }
+
+  _positionShip(ship, progress, bob = 0) {
+    if (!this.shipLane) {
+      return;
+    }
+    const approach = this.shipLane.approach;
+    const dock = this.shipLane.dock;
+    const depart = this.shipLane.depart;
+
+    const clampedProgress = Math.max(0, progress);
+    let position;
+    let direction;
+    if (clampedProgress <= 1) {
+      const t = easeInOut(clamp(clampedProgress, 0, 1));
+      position = approach.clone().lerp(dock, t);
+      direction = this.shipLane.dockDirection;
+    } else {
+      const leaveProgress = clamp(clampedProgress - 1, 0, 1);
+      const t = easeInOut(leaveProgress);
+      position = dock.clone().lerp(depart, t);
+      direction = this.shipLane.departDirection;
+    }
+
+    ship.group.position.x = position.x;
+    ship.group.position.z = position.z;
+    ship.group.position.y = (this.shipLane.surfaceY ?? 0.04) + bob;
+    const yaw = Math.atan2(direction.x, direction.z);
+    ship.group.rotation.y = yaw;
+  }
+
+  _retireShip(ship, deltaSeconds) {
+    ship.retireTimer = (ship.retireTimer || 0) + deltaSeconds;
+    ship.bobPhase += deltaSeconds * 1.2;
+    const bob = Math.sin(ship.bobPhase) * 0.12;
+    ship.progress += deltaSeconds * 0.45;
+    ship.progress = Math.min(ship.progress, 2.3);
+    ship.hull.material.color.lerp(ship.baseColor.clone().multiplyScalar(0.9), clamp(deltaSeconds * 1.5, 0, 1));
+    ship.light.intensity = Math.max(0.2, ship.light.intensity - deltaSeconds * 0.1);
+    this._positionShip(ship, ship.progress, bob);
+    if (ship.retireTimer > 5.5) {
+      this._removeShip(ship.id);
+    }
+  }
+
+  _removeShip(id) {
+    const ship = typeof id === "string" ? this.shipMeshes.get(id) : id;
+    if (!ship) {
+      return;
+    }
+    this.shipLayer?.remove(ship.group);
+    ship.group.traverse((child) => {
+      if (child.isMesh) {
+        child.geometry?.dispose?.();
+        child.material?.dispose?.();
+      } else if (child.isSprite) {
+        child.material?.map?.dispose?.();
+        child.material?.dispose?.();
+      }
+      if (child.isLight && typeof child.dispose === "function") {
+        child.dispose();
+      }
+    });
+    this.shipMeshes.delete(ship.id);
+  }
+
   _updateCamera() {
     const polar = clamp(this.cameraAngles.polar, 0.2, 1.45);
     const azimuth = this.cameraAngles.azimuth;
@@ -682,6 +1004,17 @@ export class TileRenderer {
     }
     if (this.pointerMesh?.material) {
       this.pointerMesh.material.color.set(palette.pointer);
+    }
+    if (this.waterMesh?.material) {
+      const waterBase = new THREE.Color(palette.flowLow || 0x1a5d8f);
+      this.waterMesh.material.color.copy(waterBase.lerp(new THREE.Color(0x162b3d), 0.45));
+    }
+    if (this.dockMesh?.material) {
+      const dockBase = new THREE.Color(palette.storageShell || 0x6c7682);
+      this.dockMesh.material.color.copy(dockBase.lerp(new THREE.Color(0x88929f), 0.4));
+    }
+    if (this.dockLight) {
+      this.dockLight.color = new THREE.Color(palette.flowHigh || 0xaad0ff);
     }
     if (!initial) {
       for (const pipeline of this.pipelineMeshes.values()) {
@@ -750,4 +1083,9 @@ function makeLabelTexture(text, fillColor) {
   }
   texture.needsUpdate = true;
   return texture;
+}
+
+function easeInOut(t) {
+  const clamped = clamp(t, 0, 1);
+  return clamped < 0.5 ? 2 * clamped * clamped : 1 - Math.pow(-2 * clamped + 2, 2) / 2;
 }

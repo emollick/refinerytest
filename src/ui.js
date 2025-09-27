@@ -58,6 +58,7 @@ export class UIController {
       unitDetails: document.getElementById("unit-details"),
       clock: document.getElementById("sim-clock"),
       modeBadge: document.getElementById("mode-badge"),
+      recordIndicator: document.getElementById("record-indicator"),
       inventoryGasolineBar: document.getElementById("inventory-gasoline-fill"),
       inventoryGasolineLabel: document.getElementById("inventory-gasoline-label"),
       inventoryDieselBar: document.getElementById("inventory-diesel-fill"),
@@ -67,6 +68,8 @@ export class UIController {
       shipmentList: document.getElementById("shipment-list"),
       shipmentReliability: document.getElementById("shipment-reliability"),
       directiveList: document.getElementById("directive-list"),
+      speedControls: document.getElementById("speed-controls"),
+      speedReadout: document.getElementById("speed-readout"),
     };
 
     this.profitFormatter = new Intl.NumberFormat("en-US", {
@@ -95,6 +98,10 @@ export class UIController {
       }
     }
     this.lastScoreSignature = "";
+    this.lastSpeedSignature = "";
+    this.lastRecorderSignature = "";
+    this.inspectionReports = new Map();
+    this.storageFlashTimers = new Map();
   }
 
   _bindControls() {
@@ -205,6 +212,48 @@ export class UIController {
     this._renderUnitDetails(unit || null);
   }
 
+  recordInspectionReport(report) {
+    if (!report || !report.unitId) {
+      return;
+    }
+    this.inspectionReports.set(report.unitId, { ...report });
+    if (this.selectedUnitId === report.unitId) {
+      const unit = this.simulation.getUnits().find((entry) => entry.id === report.unitId);
+      this._renderUnitDetails(unit || null);
+    }
+  }
+
+  clearInspectionReports() {
+    this.inspectionReports.clear();
+    if (this.selectedUnitId) {
+      const unit = this.simulation
+        .getUnits()
+        .find((entry) => entry.id === this.selectedUnitId);
+      this._renderUnitDetails(unit || null);
+    }
+  }
+
+  flashStorageLevel(product) {
+    if (!product) {
+      return;
+    }
+    const key = product.charAt(0).toUpperCase() + product.slice(1);
+    const bar = this.elements[`inventory${key}Bar`];
+    if (!bar) {
+      return;
+    }
+    bar.classList.add("flash");
+    const existingTimer = this.storageFlashTimers.get(bar);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+    const timer = setTimeout(() => {
+      bar.classList.remove("flash");
+      this.storageFlashTimers.delete(bar);
+    }, 900);
+    this.storageFlashTimers.set(bar, timer);
+  }
+
   _renderUnitDetails(unit) {
     const { unitDetails } = this.elements;
     unitDetails.innerHTML = "";
@@ -238,6 +287,7 @@ export class UIController {
     const overrideState = this._getOverrideState(unit);
     this._renderUnitControls(unitDetails, unit, overrideState);
     this._renderAlertDetail(unitDetails, unit);
+    this._renderInspectionDetail(unitDetails, unit);
     this._renderProcessTopology(unitDetails, unit);
   }
 
@@ -260,6 +310,12 @@ export class UIController {
     }
     const metrics = this.simulation.getMetrics();
     this._renderMetrics(metrics);
+    if (typeof this.simulation.getSpeedState === "function") {
+      this._renderSpeedState(this.simulation.getSpeedState());
+    }
+    if (typeof this.simulation.getRecorderState === "function") {
+      this._renderRecorderState(this.simulation.getRecorderState());
+    }
     this._renderLogs();
     this._updateClock();
     if (this.selectedUnitId) {
@@ -275,6 +331,12 @@ export class UIController {
 
   refreshControls() {
     this._updateSliderLabels();
+    if (typeof this.simulation.getSpeedState === "function") {
+      this._renderSpeedState(this.simulation.getSpeedState());
+    }
+    if (typeof this.simulation.getRecorderState === "function") {
+      this._renderRecorderState(this.simulation.getRecorderState());
+    }
   }
 
   setScenario(key) {
@@ -342,6 +404,84 @@ export class UIController {
 
     this._renderEconomy(metrics);
     this._renderScorecard(metrics);
+  }
+
+  _renderSpeedState(state) {
+    const { speedControls, speedReadout } = this.elements;
+    const multiplier = Number.isFinite(state?.multiplier)
+      ? state.multiplier
+      : typeof this.simulation.getSpeedMultiplier === "function"
+      ? this.simulation.getSpeedMultiplier()
+      : 1;
+    const baseMinutes = Number.isFinite(state?.baseMinutesPerSecond)
+      ? state.baseMinutesPerSecond
+      : this.simulation?.baseSpeed ?? 35;
+    const minutesPerSecond = Number.isFinite(state?.minutesPerSecond)
+      ? state.minutesPerSecond
+      : baseMinutes * multiplier;
+
+    if (speedControls) {
+      const buttons = speedControls.querySelectorAll("button[data-speed]");
+      buttons.forEach((button) => {
+        const target = Number.parseFloat(button.dataset.speed);
+        const isActive = Number.isFinite(target) ? Math.abs(target - multiplier) < 0.011 : false;
+        button.classList.toggle("active", isActive);
+        button.setAttribute("aria-pressed", isActive ? "true" : "false");
+      });
+    }
+
+    if (speedReadout) {
+      const signature = `${multiplier.toFixed(3)}-${minutesPerSecond.toFixed(2)}`;
+      if (signature !== this.lastSpeedSignature) {
+        const labelMultiplier =
+          Math.abs(multiplier - Math.round(multiplier)) < 0.01
+            ? `${Math.round(multiplier)}x time`
+            : `${multiplier.toFixed(multiplier < 1 ? 2 : 1)}x time`;
+        const speedLabel = `${minutesPerSecond.toFixed(1)} sim min/sec`;
+        speedReadout.textContent = `${labelMultiplier} · ${speedLabel}`;
+        this.lastSpeedSignature = signature;
+      }
+    }
+  }
+
+  _renderRecorderState(state) {
+    const indicator = this.elements.recordIndicator;
+    if (!indicator) {
+      return;
+    }
+
+    const active = Boolean(state?.active);
+    if (active) {
+      indicator.hidden = false;
+      indicator.classList.add("active");
+      const elapsed = Number.isFinite(state?.elapsedHours) ? state.elapsedHours : 0;
+      const elapsedLabel = elapsed >= 9.95 ? elapsed.toFixed(0) : elapsed.toFixed(1);
+      indicator.textContent = `REC ${elapsedLabel}h`;
+      const tooltip = `Recording shift (${elapsed.toFixed(2)} h elapsed)`;
+      indicator.setAttribute("title", tooltip);
+      this.lastRecorderSignature = `active-${elapsed.toFixed(2)}`;
+      return;
+    }
+
+    indicator.classList.remove("active");
+    const summary = state?.lastSummary;
+    if (summary) {
+      indicator.hidden = false;
+      indicator.textContent = "REC DONE";
+      const duration = Number.isFinite(summary.durationHours) ? summary.durationHours : 0;
+      const net = Number.isFinite(summary.netProfit)
+        ? summary.netProfit
+        : (summary.profit || 0) - (summary.penalty || 0);
+      const netLabel = `${net >= 0 ? "+" : "-"}$${Math.abs(net).toFixed(1)}M`;
+      const missed = summary.shipments?.missed || 0;
+      const tooltip = `Last shift ${duration.toFixed(1)} h · ${netLabel} · ${missed} missed`; 
+      indicator.setAttribute("title", tooltip);
+      this.lastRecorderSignature = `done-${duration.toFixed(2)}-${netLabel}-${missed}`;
+    } else {
+      indicator.hidden = true;
+      indicator.removeAttribute("title");
+      this.lastRecorderSignature = "idle";
+    }
   }
 
   _renderEconomy(metrics) {
@@ -929,6 +1069,77 @@ export class UIController {
       alertBox.appendChild(timestamp);
     }
     container.appendChild(alertBox);
+  }
+
+  _renderInspectionDetail(container, unit) {
+    if (!unit || !this.inspectionReports.has(unit.id)) {
+      return;
+    }
+    const report = this.inspectionReports.get(unit.id);
+    if (!report) {
+      return;
+    }
+
+    const section = document.createElement("div");
+    section.classList.add("unit-inspection");
+
+    const header = document.createElement("div");
+    header.classList.add("inspection-header");
+    const badge = document.createElement("span");
+    badge.classList.add("inspection-badge", report.severity || "info");
+    const severityLabels = { info: "Normal", warning: "Watch", danger: "Critical" };
+    badge.textContent = severityLabels[report.severity] || (report.severity || "Info").toUpperCase();
+    header.appendChild(badge);
+    if (report.timestamp) {
+      const timestamp = document.createElement("span");
+      timestamp.classList.add("inspection-timestamp");
+      timestamp.textContent = report.timestamp;
+      header.appendChild(timestamp);
+    }
+    section.appendChild(header);
+
+    const summary = document.createElement("p");
+    summary.classList.add("inspection-summary");
+    summary.textContent = report.summary || "Inspection results recorded.";
+    section.appendChild(summary);
+
+    if (Array.isArray(report.findings) && report.findings.length) {
+      const findingsList = document.createElement("ul");
+      findingsList.classList.add("inspection-findings");
+      report.findings.slice(0, 4).forEach((finding) => {
+        if (!finding) {
+          return;
+        }
+        const item = document.createElement("li");
+        item.textContent = finding;
+        findingsList.appendChild(item);
+      });
+      if (findingsList.childElementCount) {
+        section.appendChild(findingsList);
+      }
+    }
+
+    if (Array.isArray(report.recommendations) && report.recommendations.length) {
+      const recLabel = document.createElement("p");
+      recLabel.classList.add("inspection-label");
+      recLabel.textContent = "Recommendations:";
+      section.appendChild(recLabel);
+      const recList = document.createElement("ul");
+      recList.classList.add("inspection-recommendations");
+      report.recommendations.slice(0, 3).forEach((recommendation) => {
+        if (!recommendation) {
+          return;
+        }
+        const item = document.createElement("li");
+        item.textContent = recommendation;
+        recList.appendChild(item);
+      });
+      if (recList.childElementCount) {
+        section.appendChild(recList);
+      }
+    }
+
+    container.appendChild(section);
   }
 
   _renderProcessTopology(container, unit) {
