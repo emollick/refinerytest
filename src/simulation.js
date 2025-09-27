@@ -138,6 +138,7 @@ export class RefinerySimulation {
     );
 
     this._environmentPenaltyCooldown = 0;
+    this._lastShipmentScheduled = { gasoline: -Infinity, diesel: -Infinity, jet: -Infinity };
 
     this._ensureScheduledShipments(this.shipmentHorizonHours);
     this._updateNextShipmentCountdown();
@@ -538,6 +539,7 @@ export class RefinerySimulation {
     this.market = this._initMarketState();
     this.logs = [];
     this._environmentPenaltyCooldown = 0;
+    this._lastShipmentScheduled = { gasoline: -Infinity, diesel: -Infinity, jet: -Infinity };
     this._ensureScheduledShipments(this.shipmentHorizonHours);
     this._updateNextShipmentCountdown();
     this.recorder = this._createRecorderState();
@@ -1521,12 +1523,17 @@ export class RefinerySimulation {
     const capacity = this.storage?.capacity?.[chosenProduct] || 0;
     const level = this.storage?.levels?.[chosenProduct] || 0;
     const productRatio = capacity ? clamp(level / capacity, 0, 1.3) : 0;
+    const minProductThreshold =
+      chosenProduct === "gasoline" ? 0.42 : chosenProduct === "diesel" ? 0.32 : 0.28;
+    const lastScheduledMinutes = this._lastShipmentScheduled?.[chosenProduct] ?? -Infinity;
+    const hoursSinceLast = lastScheduledMinutes === -Infinity ? Infinity : (this.timeMinutes - lastScheduledMinutes) / 60;
 
     if (autoplan) {
-      if (productRatio < 0.45 || overallRatio < 0.42) {
+      const allowByStaleness = hoursSinceLast >= 10;
+      if ((productRatio < minProductThreshold || overallRatio < 0.42) && !allowByStaleness) {
         return null;
       }
-      if (productRatio < 0.58 && overallRatio < 0.58) {
+      if (productRatio < minProductThreshold + 0.12 && overallRatio < 0.58 && !allowByStaleness) {
         return null;
       }
     }
@@ -1696,6 +1703,10 @@ export class RefinerySimulation {
     }
 
     this._updateNextShipmentCountdown();
+    if (!this._lastShipmentScheduled) {
+      this._lastShipmentScheduled = {};
+    }
+    this._lastShipmentScheduled[product] = this.timeMinutes;
     return shipment;
   }
 
@@ -2142,18 +2153,18 @@ export class RefinerySimulation {
       );
 
       const costTarget = Math.max(
-        feedCostPerBbl * 0.72,
+        feedCostPerBbl * 0.7,
         feedCostPerBbl +
           operationsPerBbl +
           carryingPerBbl +
-          penaltyPerBbl * (0.32 + share * 0.42) +
-          logisticDrag * (0.18 + weights.shipping * 0.12) +
-          shippingPressure * weights.shipping * 11 +
-          downtimePressure * weights.downtime * 14 +
-          directiveDrag * 6 +
-          environmentPremium * weights.env * 10 +
-          safetyPremium * weights.maintenance * 5 -
-          maintenanceRelief * weights.maintenance * 15
+          penaltyPerBbl * (0.24 + share * 0.32) +
+          logisticDrag * (0.1 + weights.shipping * 0.08) +
+          shippingPressure * weights.shipping * 8 +
+          downtimePressure * weights.downtime * 10 +
+          directiveDrag * 4 +
+          environmentPremium * weights.env * 7 +
+          safetyPremium * weights.maintenance * 4 -
+          maintenanceRelief * weights.maintenance * 12
       );
 
       const prevCost = Number.isFinite(state.productionCost[product])
@@ -2164,13 +2175,13 @@ export class RefinerySimulation {
 
       const spotPrice = Math.max(spot[product] || state.futures[product] || newCost, 0);
       const futuresTarget = Math.max(
-        spotPrice * 0.62,
+        spotPrice * 0.65,
         spotPrice *
-          (1 + demandGap * 0.68 + storagePressure * 0.32 + shippingPressure * weights.shipping * 0.24 + downtimePressure * weights.downtime * 0.18 - maintenanceRelief * weights.maintenance * 0.2 + mixBias * 0.18) +
-          (penaltyPerBbl + carryingPerBbl) * 0.48 +
-          logisticDrag * 1.6 +
-          state.drift[product] * 6.5 +
-          environmentPremium * weights.env * 4.2
+          (1 + demandGap * 0.72 + storagePressure * 0.28 + shippingPressure * weights.shipping * 0.2 + downtimePressure * weights.downtime * 0.16 - maintenanceRelief * weights.maintenance * 0.16 + mixBias * 0.2) +
+          (penaltyPerBbl + carryingPerBbl) * 0.4 +
+          logisticDrag * 1.0 +
+          state.drift[product] * 5.5 +
+          environmentPremium * weights.env * 3.8
       );
 
       const prevFuture = Number.isFinite(state.futures[product])
