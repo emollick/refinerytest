@@ -138,6 +138,30 @@
                 <div id="scene-container" aria-label="Interactive refinery view"></div>
               </div>
               <section class="map-status" aria-live="polite" aria-label="Unit quick status overview">
+                <div id="map-logistics" class="map-logistics" hidden>
+                  <div class="map-logistics-header">
+                    <span class="map-logistics-title">Logistics Snapshot</span>
+                    <span id="map-logistics-status" class="map-logistics-status">Dock idle</span>
+                  </div>
+                  <div class="map-logistics-levels" role="group" aria-label="Tank utilization overview">
+                    <div class="map-logistics-card">
+                      <span class="map-logistics-label">Gasoline</span>
+                      <span id="map-logistics-gasoline" class="map-logistics-value">0%</span>
+                    </div>
+                    <div class="map-logistics-card">
+                      <span class="map-logistics-label">Diesel</span>
+                      <span id="map-logistics-diesel" class="map-logistics-value">0%</span>
+                    </div>
+                    <div class="map-logistics-card">
+                      <span class="map-logistics-label">Jet</span>
+                      <span id="map-logistics-jet" class="map-logistics-value">0%</span>
+                    </div>
+                  </div>
+                  <div class="map-logistics-footer">
+                    <span id="map-logistics-reliability" class="map-logistics-meta">Reliability 100%</span>
+                    <span id="map-logistics-next" class="map-logistics-meta">Next ship: —</span>
+                  </div>
+                </div>
                 <h3>Unit Pulse</h3>
                 <div id="alert-callouts" class="alert-callouts" aria-live="polite"></div>
                 <ul id="unit-pulse"></ul>

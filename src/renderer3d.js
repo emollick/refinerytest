@@ -793,8 +793,12 @@ export class TileRenderer {
       highlight.position.y = 0.12;
       group.add(highlight);
 
+      group.updateMatrixWorld(true);
+      const bounds = new THREE.Box3().setFromObject(group);
+      const topHeight = Number.isFinite(bounds.max?.y) ? bounds.max.y : baseHeight;
+
       const label = createLabelSprite(def.name);
-      label.position.set(0, baseHeight + 6, 0);
+      label.position.set(0, topHeight + 6, 0);
       group.add(label);
 
       this.unitMeshes.set(def.id, {

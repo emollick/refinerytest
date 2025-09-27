@@ -65,6 +65,13 @@ export class UIController {
       inventoryDieselLabel: document.getElementById("inventory-diesel-label"),
       inventoryJetBar: document.getElementById("inventory-jet-fill"),
       inventoryJetLabel: document.getElementById("inventory-jet-label"),
+      mapLogistics: document.getElementById("map-logistics"),
+      mapLogisticsStatus: document.getElementById("map-logistics-status"),
+      mapLogisticsNext: document.getElementById("map-logistics-next"),
+      mapLogisticsReliability: document.getElementById("map-logistics-reliability"),
+      mapLogisticsGasoline: document.getElementById("map-logistics-gasoline"),
+      mapLogisticsDiesel: document.getElementById("map-logistics-diesel"),
+      mapLogisticsJet: document.getElementById("map-logistics-jet"),
       shipmentList: document.getElementById("shipment-list"),
       shipmentReliability: document.getElementById("shipment-reliability"),
       directiveList: document.getElementById("directive-list"),
@@ -787,7 +794,89 @@ export class UIController {
       this.elements.storageStatus.textContent = parts.join(" · ");
     }
 
+    this._renderMiniLogistics(logistics);
+
     this._renderShipmentList(Array.isArray(shipments) ? shipments : [], stats || {});
+  }
+
+  _renderMiniLogistics(logistics) {
+    const {
+      mapLogistics,
+      mapLogisticsStatus,
+      mapLogisticsNext,
+      mapLogisticsReliability,
+      mapLogisticsGasoline,
+      mapLogisticsDiesel,
+      mapLogisticsJet,
+    } = this.elements;
+
+    if (!mapLogistics) {
+      return;
+    }
+
+    if (!logistics || !logistics.storage) {
+      mapLogistics.hidden = true;
+      return;
+    }
+
+    mapLogistics.hidden = false;
+
+    const storage = logistics.storage;
+    const setTankSnapshot = (element, product) => {
+      if (!element) {
+        return;
+      }
+      const level = storage?.levels?.[product] ?? 0;
+      const capacity = storage?.capacity?.[product] ?? 0;
+      const ratio = capacity > 0 ? Math.min(Math.max(level / capacity, 0), 1.05) : 0;
+      const percent = `${Math.round(Math.min(ratio, 1) * 100)}%`;
+      element.textContent = capacity ? `${percent} (${level.toFixed(0)} kb)` : `${level.toFixed(0)} kb`;
+    };
+
+    setTankSnapshot(mapLogisticsGasoline, "gasoline");
+    setTankSnapshot(mapLogisticsDiesel, "diesel");
+    setTankSnapshot(mapLogisticsJet, "jet");
+
+    if (mapLogisticsStatus) {
+      const pressure = logistics?.pressure || {};
+      const throttle = Math.round((pressure.throttle ?? 1) * 100);
+      const tankRatio = pressure.lastRatio ? Math.round(pressure.lastRatio * 100) : null;
+      const statusParts = [`Feed ${throttle}%`];
+      if (Number.isFinite(tankRatio)) {
+        statusParts.push(`Tanks ${tankRatio}%`);
+      }
+      mapLogisticsStatus.textContent = statusParts.join(" · ");
+      mapLogisticsStatus.dataset.state = pressure.active ? "alert" : "normal";
+    }
+
+    if (mapLogisticsReliability) {
+      const total = logistics?.stats?.total ?? 0;
+      const onTime = logistics?.stats?.onTime ?? total;
+      const reliability = total ? Math.round((onTime / total) * 100) : 100;
+      mapLogisticsReliability.innerHTML = `Reliability <strong>${reliability}%</strong>`;
+    }
+
+    if (mapLogisticsNext) {
+      const shipments = Array.isArray(logistics?.shipments) ? logistics.shipments : [];
+      let summary = "Next ship: Standby";
+      const next = shipments
+        .filter((entry) => entry && entry.status === "pending")
+        .sort((a, b) => (a.dueIn ?? 0) - (b.dueIn ?? 0))[0];
+      if (next) {
+        const productLabel = PRODUCT_LABELS[next.product] || (next.product || "Cargo");
+        const dueIn = Number.isFinite(next.dueIn) ? next.dueIn : 0;
+        if (dueIn > 0) {
+          summary = `Next: ${productLabel} in ${this._formatHours(dueIn)}`;
+        } else if (dueIn < 0) {
+          summary = `${productLabel} overdue ${this._formatHours(Math.abs(dueIn))}`;
+        } else {
+          summary = `${productLabel} at berth`;
+        }
+      } else if (shipments.some((entry) => entry && entry.status === "completed")) {
+        summary = "Next ship: Loading complete";
+      }
+      mapLogisticsNext.textContent = summary;
+    }
   }
 
   _updateInventoryBar(product, storage) {

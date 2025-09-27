@@ -719,6 +719,92 @@ body {
   color: rgba(168, 212, 255, 0.85);
 }
 
+.map-logistics {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(124, 172, 232, 0.42);
+  border-radius: 4px;
+  background: rgba(10, 20, 34, 0.7);
+}
+
+.map-logistics[hidden] {
+  display: none !important;
+}
+
+.map-logistics-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.map-logistics-title {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(190, 226, 255, 0.9);
+}
+
+.map-logistics-status {
+  font-size: 0.7rem;
+  color: rgba(214, 232, 255, 0.75);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.map-logistics-status[data-state="alert"] {
+  color: rgba(255, 196, 120, 0.95);
+}
+
+.map-logistics-levels {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.map-logistics-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid rgba(124, 172, 232, 0.35);
+  border-radius: 4px;
+  background: rgba(14, 26, 40, 0.75);
+}
+
+.map-logistics-label {
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(198, 224, 255, 0.72);
+}
+
+.map-logistics-value {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: rgba(232, 246, 255, 0.95);
+}
+
+.map-logistics-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+
+.map-logistics-meta {
+  font-size: 0.68rem;
+  color: rgba(214, 232, 255, 0.78);
+  letter-spacing: 0.04em;
+}
+
+.map-logistics-meta strong {
+  color: rgba(255, 214, 150, 0.92);
+}
+
 .prototype-notes {
   margin-top: 6px;
   padding: 8px 10px;
