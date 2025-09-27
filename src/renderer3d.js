@@ -586,7 +586,7 @@ export class TileRenderer {
       if (points.length < 2) {
         continue;
       }
-      const curve = new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.08);
+      const curve = new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.4);
       const segments = Math.max(points.length * 12, 64);
       const tubeGeometry = new THREE.TubeGeometry(curve, segments, 0.4, 16, false);
       const baseColor = new THREE.Color(def.color ?? 0x6aa5ff);

@@ -100,6 +100,7 @@ export class RefinerySimulation {
     this.market = this._initMarketState();
 
     this.storage = this._initStorage();
+    this.storageBaseCapacity = { ...this.storage.capacity };
     this.storageAlertCache = this._createStorageAlertCache();
     this.shipments = [];
     this.shipmentStats = { total: 0, onTime: 0, missed: 0 };
@@ -482,6 +483,7 @@ export class RefinerySimulation {
     this.logisticsRushCooldown = 0;
     this.pipelineBoosts = {};
     this.storage = this._initStorage();
+    this.storageBaseCapacity = { ...this.storage.capacity };
     this.storageAlertCache = this._createStorageAlertCache();
     this.shipments = [];
     this.shipmentStats = { total: 0, onTime: 0, missed: 0 };
@@ -2451,8 +2453,8 @@ export class RefinerySimulation {
     const roll = Math.random();
 
     if (roll < 0.4) {
-      const duration = randomRange(10, 16);
-      const threshold = randomRange(0.78, 0.88);
+      const duration = randomRange(8, 14);
+      const threshold = randomRange(0.74, 0.84);
       return {
         id,
         type: "reliability",
@@ -2471,9 +2473,9 @@ export class RefinerySimulation {
     if (roll < 0.7) {
       const products = ["gasoline", "diesel", "jet"];
       const product = products[Math.floor(Math.random() * products.length)];
-      const base = product === "jet" ? 60 : product === "diesel" ? 70 : 85;
-      const target = Math.round(randomRange(base * 0.9, base * 1.3));
-      const duration = randomRange(14, 20);
+      const base = product === "jet" ? 48 : product === "diesel" ? 60 : 72;
+      const target = Math.round(randomRange(base * 0.85, base * 1.15));
+      const duration = randomRange(12, 18);
       return {
         id,
         type: "delivery",
@@ -2490,8 +2492,8 @@ export class RefinerySimulation {
       };
     }
 
-    const duration = randomRange(12, 18);
-    const threshold = Math.round(randomRange(58, 72));
+    const duration = randomRange(10, 16);
+    const threshold = Math.round(randomRange(64, 78));
     return {
       id,
       type: "carbon",
@@ -2729,6 +2731,7 @@ export class RefinerySimulation {
       storage: {
         capacity: { ...this.storage.capacity },
         levels: { ...this.storage.levels },
+        baseCapacity: { ...(this.storageBaseCapacity || this.storage.capacity) },
       },
       shipments: this.shipments.map((shipment) => ({ ...shipment })),
       stats: { ...this.shipmentStats },
@@ -2896,6 +2899,7 @@ export class RefinerySimulation {
       storage: {
         capacity: { ...this.storage.capacity },
         levels: { ...this.storage.levels },
+        baseCapacity: { ...(this.storageBaseCapacity || this.storage.capacity) },
       },
       storageAlerts: clone(this.storageAlertCache),
       shipments: this.shipments.map((shipment) => ({ ...shipment })),
@@ -2981,6 +2985,14 @@ export class RefinerySimulation {
           this.storage.levels[product] = clamp(level, 0, clampMax);
         });
       }
+
+      if (snapshot.storage.baseCapacity && typeof snapshot.storage.baseCapacity === "object") {
+        this.storageBaseCapacity = { ...snapshot.storage.baseCapacity };
+      }
+    }
+
+    if (!this.storageBaseCapacity) {
+      this.storageBaseCapacity = { ...this.storage.capacity };
     }
 
     this.storageAlertCache = this._createStorageAlertCache();
