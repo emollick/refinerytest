@@ -1674,21 +1674,12 @@ function renderPrototypeNotes() {
     "SimRefinery is the Maxis Business Simulations prototype built for Chevron, mixing management play with the choreography of a live refinery.";
   const restoration = document.createElement("p");
   restoration.textContent =
-    "This restoration stitches together the recovered prototype, new 3D reactor visuals, and interactive overlays so the training scenario feels at home on the web.";
+    "This restoration uses surviving screenshots and reporting and builds on them with new visuals, a working economic model, and other details.";
   const creditIntro = document.createElement("p");
-  creditIntro.textContent = "Historical context courtesy of The Obscuritory:";
-  const credits = document.createElement("ul");
-  credits.className = "prototype-list";
-  [
-    "A close look at SimRefinery (Simulation category)",
-    "June 6, 2020 — Phil Salvador",
-    "The Obscuritory — Socials / Contact",
-  ].forEach((line) => {
-    const item = document.createElement("li");
-    item.textContent = line;
-    credits.appendChild(item);
-  });
-  prototypeNotes.append(descriptor, restoration, creditIntro, credits);
+  creditIntro.textContent = "Historical context from The Obscuritory: A close look at SimRefiner,";
+  const creditDetail = document.createElement("p");
+  creditDetail.textContent = "June 6, 2020, Phil Salvador";
+  prototypeNotes.append(descriptor, restoration, creditIntro, creditDetail);
 }
 
 function buildUnitConnectionIndex(topology) {
