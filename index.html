@@ -390,6 +390,7 @@
                 </div>
                 <div class="logistics-actions" role="group" aria-label="Logistics controls">
                   <button id="logistics-expedite" type="button">Call Emergency Ship</button>
+                  <button id="logistics-delay" type="button">Delay Next Ship</button>
                   <button id="logistics-expand" type="button">Expand Tank Farm</button>
                   <p id="storage-status" class="logistics-status" aria-live="polite"></p>
                 </div>
@@ -422,40 +423,6 @@
           </div>
         </section>
       </div>
-
-      <section id="footer" class="window about-window">
-        <header class="window-title">Operator Notes</header>
-        <div class="window-body">
-          <p>
-            This rebuild leans into the tile-based look of the surviving screenshots — a SimCity/SimFarm style
-            refinery where everything is made from diamonds and tiny rectangles. The Map and Edit windows mirror
-            the Whiteboard interface Maxis Business Simulations delivered to Chevron, right down to the unfinished
-            tools that hinted at future expansion.
-          </p>
-          <ul class="notes-list">
-            <li>
-              Session → Load Old/New now drop you into curated Chevron scenarios — one with deferred maintenance and full
-              tanks, the other chasing jet export contracts.
-            </li>
-            <li>
-              The ROAD, PIPE, and MAINT toolbar commands tie into logistics convoys, temporary feed bypasses, and planned
-              turnarounds so you can actively manage trouble spots.
-            </li>
-            <li>
-              Use the <strong>Record</strong> and <strong>Inspect</strong> buttons to trigger the tutorial and inspection callouts that
-              trainers relied on when showing the prototype.
-            </li>
-            <li>
-              External events — hot oil fires, lightning, and abrasive dust clouds — continue to loop to emphasise
-              how a misstep in one unit affects the whole plant.
-            </li>
-            <li>
-              The Production Dashboard now breaks out revenue, costs, penalties, and live margin so the impact of each
-              decision shows up immediately.
-            </li>
-          </ul>
-        </div>
-      </section>
     </div>
 
     <script type="module" src="./src/main.js?v=6"></script>

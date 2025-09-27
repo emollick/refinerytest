@@ -79,6 +79,7 @@ export class UIController {
       speedControls: document.getElementById("speed-controls"),
       speedReadout: document.getElementById("speed-readout"),
       logisticsExpedite: document.getElementById("logistics-expedite"),
+      logisticsDelay: document.getElementById("logistics-delay"),
       logisticsExpand: document.getElementById("logistics-expand"),
       storageStatus: document.getElementById("storage-status"),
     };
@@ -174,6 +175,16 @@ export class UIController {
         const result = simulation.requestExtraShipment();
         if (result && result.product) {
           this.flashStorageLevel(result.product);
+        }
+        this.update(simulation.getLogisticsState(), null);
+      });
+    }
+
+    if (elements.logisticsDelay && typeof simulation.delayNextShipment === "function") {
+      elements.logisticsDelay.addEventListener("click", () => {
+        const delayed = simulation.delayNextShipment();
+        if (delayed && delayed.product) {
+          this.flashStorageLevel(delayed.product);
         }
         this.update(simulation.getLogisticsState(), null);
       });
@@ -769,6 +780,29 @@ export class UIController {
       this.elements.logisticsExpedite.title = disabled
         ? `Emergency charter crews resetting (${cooldown.toFixed(1)} hours)`
         : "Stage an expedited marine shipment";
+    }
+
+    if (this.elements.logisticsDelay) {
+      const pending = Array.isArray(shipments)
+        ? shipments
+            .filter((shipment) => shipment && shipment.status === "pending" && !shipment.rush)
+            .sort((a, b) => (a.dueIn ?? Infinity) - (b.dueIn ?? Infinity))
+        : [];
+      const candidate = pending[0];
+      const disabled = !candidate;
+      this.elements.logisticsDelay.disabled = disabled;
+      this.elements.logisticsDelay.setAttribute("aria-disabled", disabled ? "true" : "false");
+      this.elements.logisticsDelay.textContent = disabled
+        ? "Delay Next Ship"
+        : `Delay ${PRODUCT_LABELS[candidate.product] || candidate.product}`;
+      if (disabled) {
+        this.elements.logisticsDelay.title = "No standard shipments are waiting at the dock.";
+      } else {
+        const due = Number.isFinite(candidate.dueIn) ? candidate.dueIn : 0;
+        this.elements.logisticsDelay.title = `Push the next ${
+          PRODUCT_LABELS[candidate.product] || candidate.product
+        } sailing back (currently due in ${this._formatHours(due)}).`;
+      }
     }
 
     if (this.elements.logisticsExpand) {

@@ -2059,19 +2059,6 @@ body {
   font-size: 0.75rem;
 }
 
-.notes-list {
-  margin: 10px 0 0;
-  padding-left: 22px;
-  font-size: 0.75rem;
-  line-height: 1.4;
-  color: #1f2a3a;
-  font-family: "Inconsolata", monospace;
-}
-
-.notes-list li {
-  margin-bottom: 4px;
-}
-
 #event-log li {
   padding: 4px 6px;
   background: rgba(216, 226, 237, 0.75);
@@ -2406,17 +2393,6 @@ body {
 
 .directive.failed .directive-progress .fill {
   background: linear-gradient(90deg, rgba(244, 132, 132, 0.9), rgba(211, 72, 72, 0.95));
-}
-
-.about-window {
-  max-width: 720px;
-}
-
-.about-window .window-body {
-  background: rgba(246, 248, 252, 0.88);
-  font-size: 0.8rem;
-  line-height: 1.4;
-  color: #1c2c40;
 }
 
 @media (max-width: 980px) {
