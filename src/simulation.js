@@ -1442,10 +1442,11 @@ export class RefinerySimulation {
 
   _updateLogistics(context) {
     const { production, hours, prices, scenario } = context;
+    const dayFraction = hours / HOURS_PER_DAY;
     const produced = {
-      gasoline: Math.max(0, production.gasoline * hours),
-      diesel: Math.max(0, production.diesel * hours),
-      jet: Math.max(0, production.jet * hours),
+      gasoline: Math.max(0, production.gasoline * dayFraction),
+      diesel: Math.max(0, production.diesel * dayFraction),
+      jet: Math.max(0, production.jet * dayFraction),
     };
 
     Object.entries(produced).forEach(([product, volume]) => {
