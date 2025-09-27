@@ -215,14 +215,6 @@ export class TileRenderer {
     const storageCap = logistics.storage?.capacity || {};
 
     for (const tank of this.storageMeshes.values()) {
-      const level = Number.isFinite(Number(storageLevels[tank.key]))
-        ? Number(storageLevels[tank.key])
-        : 0;
-      const capacity = Number.isFinite(Number(storageCap[tank.key])) && Number(storageCap[tank.key]) > 0
-        ? Number(storageCap[tank.key])
-        : 1;
-      const ratio = clamp(level / capacity, 0, 1);
-
       if (tank.fill) {
         tank.fill.visible = false;
       }
@@ -232,15 +224,13 @@ export class TileRenderer {
       }
 
       if (tank.shell?.material) {
-        const baseColor = tank.shell.material.userData.baseColor || tank.shell.material.color.clone();
-        tank.shell.material.userData.baseColor = baseColor;
-        tank.shell.material.color.copy(baseColor).lerp(new THREE.Color(0xffffff), ratio * 0.15);
-        tank.shell.material.emissiveIntensity = 0.1 + ratio * 0.4;
+        tank.shell.material.color.copy(tank.shell.material.userData?.baseColor || tank.shell.material.color);
+        tank.shell.material.emissiveIntensity = 0.1;
       }
 
       if (tank.label) {
         tank.label.position.y = (tank.baseHeight || 14) + 5;
-        tank.label.material.opacity = 0.75 + ratio * 0.25;
+        tank.label.material.opacity = 0.85;
       }
     }
 
@@ -695,10 +685,7 @@ export class TileRenderer {
         roughness: 0.58,
         side: THREE.DoubleSide,
       });
-      if (shellMaterial.emissive) {
-        shellMaterial.emissive = new THREE.Color(palette.storageShell).multiplyScalar(0.1);
-        shellMaterial.emissiveIntensity = 0.1;
-      }
+      shellMaterial.userData.baseColor = new THREE.Color(shellMaterial.color.getHex());
       const shell = new THREE.Mesh(shellGeometry, shellMaterial);
       shell.position.y = height / 2;
       group.add(shell);
