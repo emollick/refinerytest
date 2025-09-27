@@ -61,6 +61,7 @@ export class TileRenderer {
     this.simulation = simulationInstance;
     this.unitDefs = unitDefs;
     this.pipelineDefs = pipelineDefs;
+    this.unitDefMap = new Map((unitDefs || []).map((unit) => [unit.id, unit]));
     this.options = { ...DEFAULT_OPTIONS, ...options };
     this.interactionEnabled = Boolean(this.options.interactionEnabled);
 
@@ -216,11 +217,25 @@ export class TileRenderer {
       const level = storageLevels[tank.key] || 0;
       const capacity = storageCap[tank.key] || 1;
       const ratio = capacity ? clamp(level / capacity, 0, 1) : 0;
+      if (tank.baseColor) {
+        const color = tank.baseColor.clone().lerp(new THREE.Color(0xffffff), ratio * 0.25);
+        tank.fill.material.color.copy(color);
+        if (tank.surface) {
+          tank.surface.material.color.copy(color.clone().lerp(new THREE.Color(0xffffff), 0.18));
+        }
+      }
       tank.fill.scale.y = Math.max(ratio, 0.02);
       tank.fill.position.y = tank.baseHeight * tank.fill.scale.y * 0.5 + 0.05;
       const emissiveIntensity = 0.25 + ratio * 1.5;
       tank.fill.material.emissiveIntensity = emissiveIntensity;
       tank.label.material.opacity = 0.75 + ratio * 0.25;
+      if (tank.surface) {
+        tank.surface.position.y = tank.fill.position.y + (tank.baseHeight * tank.fill.scale.y) / 2 - 0.02;
+        tank.surface.material.opacity = 0.65 + ratio * 0.3;
+        if (tank.surface.material.emissive) {
+          tank.surface.material.emissiveIntensity = 0.12 + ratio * 0.6;
+        }
+      }
     }
 
     this._updateShips(deltaSeconds, logistics);
@@ -538,7 +553,13 @@ export class TileRenderer {
 
   _createPipelines() {
     for (const def of this.pipelineDefs) {
-      const points = (def.path || []).map((pt) => this._tileToWorld(pt.x, pt.y, 0.6));
+      const points = [];
+      (def.path || []).forEach((entry, index) => {
+        const point = this._resolvePipelinePoint(entry, index, def);
+        if (point) {
+          points.push(point);
+        }
+      });
       if (points.length < 2) {
         continue;
       }
@@ -583,6 +604,56 @@ export class TileRenderer {
         phase: def.phase || 0,
       });
     }
+  }
+
+  _resolvePipelinePoint(entry, index, def) {
+    if (!entry) {
+      return null;
+    }
+    const height = typeof entry.height === "number" ? entry.height : 0.6;
+    if (entry.unit) {
+      const anchor = this._resolveUnitAnchor(entry);
+      return this._tileToWorld(anchor.x, anchor.y, height);
+    }
+    if (typeof entry.x === "number" && typeof entry.y === "number") {
+      const offsetX = entry.dx || 0;
+      const offsetY = entry.dy || 0;
+      return this._tileToWorld(entry.x + offsetX, entry.y + offsetY, height);
+    }
+    return null;
+  }
+
+  _resolveUnitAnchor(entry) {
+    const unit = this.unitDefMap?.get(entry.unit);
+    if (!unit) {
+      return { x: entry.x || 0, y: entry.y || 0 };
+    }
+    const anchor = entry.anchor || "center";
+    const pad = typeof entry.pad === "number" ? entry.pad : 0.35;
+    let x = unit.tileX + unit.width / 2;
+    let y = unit.tileY + unit.height / 2;
+
+    switch (anchor) {
+      case "east":
+        x = unit.tileX + unit.width + pad;
+        break;
+      case "west":
+        x = unit.tileX - pad;
+        break;
+      case "north":
+        y = unit.tileY - pad;
+        break;
+      case "south":
+        y = unit.tileY + unit.height + pad;
+        break;
+      default:
+        break;
+    }
+
+    x += entry.dx || 0;
+    y += entry.dy || 0;
+
+    return { x, y };
   }
 
   _createStorage() {
@@ -634,6 +705,21 @@ export class TileRenderer {
       fill.position.y = height * 0.05;
       group.add(fill);
 
+      const surfaceGeometry = new THREE.CircleGeometry(radius * 0.82, 32);
+      const surfaceMaterial = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(entry.color).lerp(new THREE.Color(0xffffff), 0.2),
+        metalness: 0.08,
+        roughness: 0.24,
+        transparent: true,
+        opacity: 0.92,
+      });
+      surfaceMaterial.emissive = new THREE.Color(entry.color).multiplyScalar(0.12);
+      surfaceMaterial.emissiveIntensity = 0.2;
+      const surface = new THREE.Mesh(surfaceGeometry, surfaceMaterial);
+      surface.rotation.x = -Math.PI / 2;
+      surface.position.y = fill.position.y + (height * fill.scale.y) / 2;
+      group.add(surface);
+
       const label = createLabelSprite(entry.key.toUpperCase(), palette.storageLabels);
       label.position.set(0, height + 5, 0);
       label.scale.set(16, 4.5, 1);
@@ -645,6 +731,9 @@ export class TileRenderer {
         fill,
         label,
         baseHeight: height,
+        surface,
+        radius,
+        baseColor: new THREE.Color(entry.color),
       });
     }
   }

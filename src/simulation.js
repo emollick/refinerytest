@@ -52,6 +52,8 @@ export class RefinerySimulation {
       profitPerHour: 0,
       revenuePerDay: 0,
       expensePerDay: 0,
+      operatingExpensePerDay: 0,
+      crudeExpensePerDay: 0,
       penaltyPerDay: 0,
       marginMultiplier: 1,
       futuresGasoline: 0,
@@ -102,6 +104,9 @@ export class RefinerySimulation {
     this.shipments = [];
     this.shipmentStats = { total: 0, onTime: 0, missed: 0 };
     this.nextShipmentIn = 2.5;
+    this.storagePressure = { active: false, throttle: 1, timer: 0, lastRatio: 0 };
+    this.extraShipmentCooldown = 0;
+    this.storageUpgrades = { level: 0 };
     this.directives = [];
     this.directiveStats = { total: 0, completed: 0, failed: 0 };
     this._seedDirectives();
@@ -435,6 +440,8 @@ export class RefinerySimulation {
       profitPerHour: 0,
       revenuePerDay: 0,
       expensePerDay: 0,
+      operatingExpensePerDay: 0,
+      crudeExpensePerDay: 0,
       penaltyPerDay: 0,
       marginMultiplier: 1,
       futuresGasoline: 0,
@@ -479,6 +486,9 @@ export class RefinerySimulation {
     this.shipments = [];
     this.shipmentStats = { total: 0, onTime: 0, missed: 0 };
     this.nextShipmentIn = 2.5;
+    this.storagePressure = { active: false, throttle: 1, timer: 0, lastRatio: 0 };
+    this.extraShipmentCooldown = 0;
+    this.storageUpgrades = { level: 0 };
     this.directives = [];
     this.directiveStats = { total: 0, completed: 0, failed: 0 };
     this._seedDirectives();
@@ -565,12 +575,14 @@ export class RefinerySimulation {
     const hours = deltaMinutes / 60;
 
     this.logisticsRushCooldown = Math.max(0, this.logisticsRushCooldown - hours);
+    this.extraShipmentCooldown = Math.max(0, (this.extraShipmentCooldown || 0) - hours);
     this._prunePipelineBoosts();
     const extraOperationalCost = this._consumeOperationalCost();
 
     const scenario = this.activeScenario;
     const crudeSetting = this.params.crudeIntake;
-    const crudeAvailable = crudeSetting * scenario.crudeMultiplier;
+    const storageThrottle = this.storagePressure?.throttle ?? 1;
+    const crudeAvailable = crudeSetting * scenario.crudeMultiplier * storageThrottle;
 
     const distState = this._resolveUnitState("distillation");
     const distillation = distState.unit;
@@ -836,8 +848,13 @@ export class RefinerySimulation {
       marketConditions,
       crudeThroughput,
     });
-    const profitPerDay = adjustedRevenue - crudeExpense - totalOperatingExpense - penalty;
-    const profitPerHour = profitPerDay / HOURS_PER_DAY;
+    const revenuePerHour = adjustedRevenue;
+    const operatingExpensePerHour = totalOperatingExpense;
+    const crudeExpensePerHour = crudeExpense;
+    const expensePerHour = operatingExpensePerHour + crudeExpensePerHour;
+    const penaltyPerHour = penalty;
+    const profitPerHour = revenuePerHour - expensePerHour - penaltyPerHour;
+    const profitPerDay = profitPerHour * HOURS_PER_DAY;
 
     this.metrics.gasoline = this._round(result.gasoline);
     this.metrics.diesel = this._round(result.diesel);
@@ -845,10 +862,13 @@ export class RefinerySimulation {
     this.metrics.lpg = this._round(result.lpg);
     this.metrics.crudeCostPerBbl = crudeCostPerBbl;
     this.metrics.profitPerHour = profitPerHour;
-    this.metrics.revenuePerDay = adjustedRevenue;
-    this.metrics.expensePerDay = totalOperatingExpense;
-    this.metrics.penaltyPerDay = penalty;
+    this.metrics.revenuePerDay = revenuePerHour * HOURS_PER_DAY;
+    this.metrics.expensePerDay = expensePerHour * HOURS_PER_DAY;
+    this.metrics.operatingExpensePerDay = operatingExpensePerHour * HOURS_PER_DAY;
+    this.metrics.crudeExpensePerDay = crudeExpensePerHour * HOURS_PER_DAY;
+    this.metrics.penaltyPerDay = penaltyPerHour * HOURS_PER_DAY;
     this.metrics.marginMultiplier = marketConditions.multiplier;
+    this.metrics.storageThrottle = storageThrottle;
     this.metrics.futuresGasoline = economy.futures.gasoline;
     this.metrics.futuresDiesel = economy.futures.diesel;
     this.metrics.futuresJet = economy.futures.jet;
@@ -1393,6 +1413,7 @@ export class RefinerySimulation {
       this.shipmentStats.total += 1;
       this.shipmentStats.onTime += 1;
       report.delivered[product] += shipment.volume;
+      this._relieveStoragePressure(0.14);
       this.pushLog(
         "info",
         `Loaded ${shipment.volume.toFixed(0)} kb of ${PRODUCT_LABELS[product]} for departure.`
@@ -1459,6 +1480,8 @@ export class RefinerySimulation {
       this._updateStorageAlert(product, ratio);
     });
 
+    this._applyStoragePressure(maxRatio, hours);
+
     if (maxRatio > 0.82) {
       this.nextShipmentIn -= hours * (1 + (maxRatio - 0.82) * 6);
       if (maxRatio > 0.95) {
@@ -1522,6 +1545,68 @@ export class RefinerySimulation {
     this.metrics.shipmentReliability = shipmentTotal ? clamp(onTime / shipmentTotal, 0, 1) : 1;
 
     return report;
+  }
+
+  _applyStoragePressure(maxRatio, hours) {
+    if (!this.storagePressure) {
+      this.storagePressure = { active: false, throttle: 1, timer: 0, lastRatio: 0 };
+    }
+    const pressure = this.storagePressure;
+    pressure.lastRatio = maxRatio;
+
+    const threshold = 0.95;
+    const reliefRate = Math.max(0.08, hours * 0.16);
+
+    if (maxRatio >= threshold) {
+      const severity = clamp((maxRatio - threshold) / 0.07, 0, 1);
+      const newThrottle = clamp(1 - severity * 0.55, 0.45, 1);
+      const wasActive = pressure.active;
+      pressure.active = true;
+      pressure.throttle = Math.min(pressure.throttle, newThrottle);
+      pressure.timer = Math.max(pressure.timer, 2 + severity * 6);
+      if (!wasActive) {
+        this.pushLog(
+          "warning",
+          `Storage congestion forcing crude intake to ${Math.round(pressure.throttle * 100)}%.`,
+          { storage: true }
+        );
+      }
+    } else if (pressure.active) {
+      pressure.timer = Math.max(pressure.timer - hours, 0);
+      pressure.throttle = clamp(pressure.throttle + reliefRate, 0.45, 1);
+      if (pressure.timer <= 0 || pressure.throttle >= 0.995) {
+        pressure.active = false;
+        pressure.throttle = 1;
+        pressure.timer = 0;
+        this.pushLog("info", "Tank pressure relieved; crude feed restored to 100%.", { storage: true });
+      }
+    } else {
+      pressure.throttle = clamp(pressure.throttle + reliefRate, 0.45, 1);
+      pressure.timer = Math.max(pressure.timer - hours, 0);
+      if (pressure.throttle >= 0.995) {
+        pressure.throttle = 1;
+      }
+    }
+  }
+
+  _relieveStoragePressure(boost = 0.12) {
+    if (!this.storagePressure) {
+      return;
+    }
+    const pressure = this.storagePressure;
+    if (!pressure.active) {
+      return;
+    }
+    pressure.throttle = clamp(pressure.throttle + boost, 0.45, 1);
+    pressure.timer = Math.max(0, pressure.timer - boost * 8);
+    if (pressure.throttle >= 0.995 || pressure.timer <= 0) {
+      pressure.active = false;
+      pressure.throttle = 1;
+      pressure.timer = 0;
+      this.pushLog("info", "Logistics relief eased tank pressure; crude feed back to 100%.", {
+        storage: true,
+      });
+    }
   }
 
   _updateRecorder(context) {
@@ -1947,6 +2032,7 @@ export class RefinerySimulation {
     this.pendingOperationalCost += 260 + relief * 1.6;
     this.nextShipmentIn = Math.min(this.nextShipmentIn, 1.05);
     this.logisticsRushCooldown = 6;
+    this._relieveStoragePressure(0.18);
 
     if (this._countPendingShipments() < 2) {
       this._scheduleShipment();
@@ -1961,6 +2047,119 @@ export class RefinerySimulation {
       { product: targetProduct }
     );
     return { product: targetProduct, volume: relief };
+  }
+
+  requestExtraShipment() {
+    if (this.extraShipmentCooldown > 0.1) {
+      const waitHours = Math.max(1, Math.round(this.extraShipmentCooldown));
+      this.pushLog(
+        "info",
+        `Expedite crews already en route — try again in ~${waitHours} h.`
+      );
+      return false;
+    }
+
+    if (!this.storage?.levels) {
+      this.pushLog("info", "Storage data unavailable; request skipped.");
+      return false;
+    }
+
+    let targetProduct = null;
+    let highestRatio = 0;
+    Object.entries(this.storage.levels).forEach(([product, level]) => {
+      const capacity = this.storage.capacity?.[product] || 0;
+      if (!capacity) {
+        return;
+      }
+      const ratio = capacity ? clamp(level / capacity, 0, 1.2) : 0;
+      if (ratio > highestRatio) {
+        highestRatio = ratio;
+        targetProduct = product;
+      }
+    });
+
+    if (!targetProduct) {
+      this.pushLog("info", "No product selected for emergency shipment.");
+      return false;
+    }
+
+    if (highestRatio < 0.55) {
+      this.pushLog("info", "Tanks are manageable — emergency charter not approved.");
+      return false;
+    }
+
+    const capacity = this.storage.capacity[targetProduct] || 0;
+    const level = this.storage.levels[targetProduct] || 0;
+    if (level <= 0) {
+      this.pushLog("info", "No inventory available to stage an emergency shipment.");
+      return false;
+    }
+
+    const urgency = clamp((highestRatio - 0.55) / 0.45, 0, 1);
+    const window = Math.max(0.8, randomRange(1.0, 1.6) * (1 - urgency * 0.35));
+    const dueIn = Math.max(0.25, randomRange(0.35, 0.9) * (1 - urgency * 0.3));
+    const volume = Math.min(level, capacity * clamp(0.12 + urgency * 0.24, 0.12, 0.34));
+
+    const shipment = {
+      id: `rush-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+      product: targetProduct,
+      volume,
+      window,
+      dueIn,
+      status: "pending",
+      createdAt: this.timeMinutes,
+      cooldown: 0,
+      rush: true,
+    };
+    this.shipments.push(shipment);
+
+    const cost = 420 + volume * 2.4;
+    this.pendingOperationalCost += cost;
+    this.extraShipmentCooldown = 4;
+    this.nextShipmentIn = Math.min(this.nextShipmentIn, dueIn + window * 0.4);
+    this._relieveStoragePressure(0.1);
+
+    const label = this._formatProductLabel(targetProduct);
+    this.pushLog(
+      "info",
+      `Emergency charter staged: ${volume.toFixed(0)} kb of ${label} loading in ~${dueIn.toFixed(
+        1
+      )} h (cost $${cost.toFixed(0)}k).`
+    );
+
+    return { product: targetProduct, volume, dueIn, cost };
+  }
+
+  expandStorageCapacity() {
+    const level = this.storageUpgrades?.level || 0;
+    if (level >= 6) {
+      this.pushLog("info", "Tank farm already at maximum planned expansion.");
+      return false;
+    }
+
+    const growth = clamp(0.08 + level * 0.02, 0.08, 0.18);
+    const cost = 680 + level * 340;
+
+    Object.entries(this.storage.capacity).forEach(([product, capacity]) => {
+      const newCapacity = capacity * (1 + growth);
+      this.storage.capacity[product] = newCapacity;
+      if (this.storage.levels[product] > newCapacity) {
+        this.storage.levels[product] = newCapacity;
+      }
+    });
+
+    this.pendingOperationalCost += cost;
+    this.storageUpgrades.level = level + 1;
+    this._relieveStoragePressure(0.22);
+
+    this.pushLog(
+      "info",
+      `Construction staged — tank farm capacity up ${(growth * 100).toFixed(0)}% (cost $${cost.toFixed(
+        0
+      )}k).`
+    );
+
+    return { level: this.storageUpgrades.level, growth, cost };
   }
 
   togglePerformanceRecording() {
@@ -2532,6 +2731,9 @@ export class RefinerySimulation {
       stats: { ...this.shipmentStats },
       convoyCooldown: this.logisticsRushCooldown,
       nextShipmentIn: Math.max(0, this.nextShipmentIn),
+      pressure: this.storagePressure ? { ...this.storagePressure } : { active: false, throttle: 1, timer: 0 },
+      extraShipmentCooldown: this.extraShipmentCooldown || 0,
+      upgrades: { ...this.storageUpgrades },
       alerts: this.getStorageAlerts(),
     };
   }
@@ -2700,6 +2902,9 @@ export class RefinerySimulation {
       units,
       recorder: this.getRecorderState(),
       lastRecordingSummary: this.lastRecordingSummary ? { ...this.lastRecordingSummary } : null,
+      storagePressure: this.storagePressure ? { ...this.storagePressure } : null,
+      extraShipmentCooldown: this.extraShipmentCooldown,
+      storageUpgrades: this.storageUpgrades ? { ...this.storageUpgrades } : null,
       directives: this.directives.map((directive) => ({ ...directive })),
       directiveStats: { ...this.directiveStats },
       performanceHistory: this.performanceHistory.map((entry) => ({ ...entry })),
@@ -2853,6 +3058,42 @@ export class RefinerySimulation {
       typeof snapshot.nextShipmentIn === "number" && Number.isFinite(snapshot.nextShipmentIn)
         ? Math.max(0, snapshot.nextShipmentIn)
         : this.nextShipmentIn;
+
+    if (snapshot.storagePressure && typeof snapshot.storagePressure === "object") {
+      this.storagePressure = {
+        active: Boolean(snapshot.storagePressure.active),
+        throttle:
+          typeof snapshot.storagePressure.throttle === "number"
+            ? clamp(snapshot.storagePressure.throttle, 0.45, 1)
+            : 1,
+        timer:
+          typeof snapshot.storagePressure.timer === "number" && Number.isFinite(snapshot.storagePressure.timer)
+            ? Math.max(0, snapshot.storagePressure.timer)
+            : 0,
+        lastRatio:
+          typeof snapshot.storagePressure.lastRatio === "number"
+            ? clamp(snapshot.storagePressure.lastRatio, 0, 1.2)
+            : 0,
+      };
+    } else {
+      this.storagePressure = { active: false, throttle: 1, timer: 0, lastRatio: 0 };
+    }
+
+    this.extraShipmentCooldown =
+      typeof snapshot.extraShipmentCooldown === "number" && Number.isFinite(snapshot.extraShipmentCooldown)
+        ? Math.max(0, snapshot.extraShipmentCooldown)
+        : 0;
+
+    if (snapshot.storageUpgrades && typeof snapshot.storageUpgrades === "object") {
+      this.storageUpgrades = {
+        level:
+          typeof snapshot.storageUpgrades.level === "number" && Number.isFinite(snapshot.storageUpgrades.level)
+            ? Math.max(0, Math.round(snapshot.storageUpgrades.level))
+            : 0,
+      };
+    } else {
+      this.storageUpgrades = { level: 0 };
+    }
 
     if (snapshot.recorder && typeof snapshot.recorder === "object") {
       const restored = this._createRecorderState();

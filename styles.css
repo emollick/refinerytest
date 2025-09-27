@@ -2020,6 +2020,58 @@ body {
   color: #1b2433;
 }
 
+.logistics-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0 6px;
+}
+
+.logistics-actions button {
+  font-family: "Inconsolata", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  padding: 6px 12px;
+  border: 2px solid #ffffff;
+  border-right-color: #5a5a5a;
+  border-bottom-color: #5a5a5a;
+  background: linear-gradient(#e8ecf4, #c0c9d8);
+  color: #122036;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.logistics-actions button:hover:not(:disabled) {
+  background: linear-gradient(#f4f7fc, #d5dce7);
+}
+
+.logistics-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.logistics-actions button:active:not(:disabled) {
+  transform: translateY(1px);
+  border-top-color: #5a5a5a;
+  border-left-color: #5a5a5a;
+  border-right-color: #ffffff;
+  border-bottom-color: #ffffff;
+}
+
+.logistics-status {
+  margin: 0;
+  flex: 1 1 180px;
+  font-size: 0.7rem;
+  color: rgba(19, 35, 58, 0.85);
+}
+
+.logistics-status[data-state="alert"] {
+  color: #9c2f2f;
+  font-weight: 600;
+}
+
 .inventory-bar {
   height: 12px;
   border: 1px solid rgba(28, 46, 78, 0.35);
@@ -2094,6 +2146,15 @@ body {
 .shipment.missed {
   border-color: rgba(214, 110, 110, 0.6);
   background: linear-gradient(180deg, rgba(46, 20, 20, 0.94), rgba(26, 12, 12, 0.9));
+}
+
+.shipment.rush {
+  border-color: rgba(132, 202, 255, 0.75);
+  box-shadow: 0 0 10px rgba(132, 202, 255, 0.32);
+}
+
+.shipment.rush .shipment-status {
+  color: rgba(185, 231, 255, 0.95);
 }
 
 .shipment.empty {

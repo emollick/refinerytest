@@ -125,10 +125,10 @@ const pipelineConfigs = [
     color: 0x6fc2ff,
     phase: 0,
     path: [
-      { x: 7, y: 4.5 },
-      { x: 5, y: 4.5 },
-      { x: 5, y: 7 },
-      { x: 3.5, y: 7 },
+      { unit: "distillation", anchor: "west", dy: -0.2 },
+      { x: 5.6, y: 4.5 },
+      { x: 5.2, y: 7.1 },
+      { unit: "reformer", anchor: "east", dy: -0.1 },
     ],
   },
   {
@@ -138,10 +138,10 @@ const pipelineConfigs = [
     color: 0xf7b25c,
     phase: 1.3,
     path: [
-      { x: 7, y: 4.5 },
+      { unit: "distillation", anchor: "east", dy: -0.25 },
       { x: 9.5, y: 4.5 },
-      { x: 9.5, y: 7 },
-      { x: 11, y: 7 },
+      { x: 9.7, y: 6.8 },
+      { unit: "fcc", anchor: "west", dy: -0.1 },
     ],
   },
   {
@@ -151,10 +151,9 @@ const pipelineConfigs = [
     color: 0x8ee2c4,
     phase: 2.2,
     path: [
-      { x: 7, y: 4.5 },
-      { x: 4.5, y: 4.5 },
-      { x: 4.5, y: 3.5 },
-      { x: 3.5, y: 3.5 },
+      { unit: "distillation", anchor: "north", dx: 0.2 },
+      { x: 4.6, y: 3.2 },
+      { unit: "hydrocracker", anchor: "south", dx: 0.1 },
     ],
   },
   {
@@ -164,9 +163,9 @@ const pipelineConfigs = [
     color: 0xc5a1ff,
     phase: 2.9,
     path: [
-      { x: 11, y: 7 },
-      { x: 12, y: 7 },
-      { x: 12, y: 3.5 },
+      { unit: "fcc", anchor: "east", dy: -0.15 },
+      { x: 12, y: 6.9 },
+      { unit: "alkylation", anchor: "west", dy: -0.1 },
     ],
   },
   {
@@ -176,10 +175,10 @@ const pipelineConfigs = [
     color: 0x9ec8ff,
     phase: 3.6,
     path: [
-      { x: 7, y: 4.5 },
-      { x: 11, y: 4.5 },
-      { x: 11, y: 9.5 },
-      { x: 13.5, y: 9.5 },
+      { unit: "distillation", anchor: "east", dy: 0.3 },
+      { x: 11, y: 4.8 },
+      { x: 11.3, y: 9.4 },
+      { x: 13.6, y: 9.4 },
     ],
   },
 ];

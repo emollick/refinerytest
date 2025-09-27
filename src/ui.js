@@ -70,6 +70,9 @@ export class UIController {
       directiveList: document.getElementById("directive-list"),
       speedControls: document.getElementById("speed-controls"),
       speedReadout: document.getElementById("speed-readout"),
+      logisticsExpedite: document.getElementById("logistics-expedite"),
+      logisticsExpand: document.getElementById("logistics-expand"),
+      storageStatus: document.getElementById("storage-status"),
     };
 
     this.profitFormatter = new Intl.NumberFormat("en-US", {
@@ -157,6 +160,27 @@ export class UIController {
       simulation.applyScenario(event.target.value);
       this._updateScenarioDescription();
     });
+
+    if (elements.logisticsExpedite && typeof simulation.requestExtraShipment === "function") {
+      elements.logisticsExpedite.addEventListener("click", () => {
+        const result = simulation.requestExtraShipment();
+        if (result && result.product) {
+          this.flashStorageLevel(result.product);
+        }
+        this.update(simulation.getLogisticsState(), null);
+      });
+    }
+
+    if (elements.logisticsExpand && typeof simulation.expandStorageCapacity === "function") {
+      elements.logisticsExpand.addEventListener("click", () => {
+        const outcome = simulation.expandStorageCapacity();
+        if (outcome && outcome.level) {
+          this.update(simulation.getLogisticsState(), null);
+        } else {
+          this.update(simulation.getLogisticsState(), null);
+        }
+      });
+    }
   }
 
   _populateScenarios() {
@@ -381,17 +405,19 @@ export class UIController {
     }
 
     if (this.elements.expenseOutput) {
-      const expense = typeof metrics.expensePerDay === "number" ? metrics.expensePerDay : 0;
+      const expensePerHour =
+        typeof metrics.expensePerDay === "number" ? metrics.expensePerDay / 24 : 0;
       this.elements.expenseOutput.textContent = `${this.profitFormatter.format(
-        Math.round(expense * 1000)
-      )} / day`;
+        Math.round(expensePerHour * 1000)
+      )} / hr`;
     }
 
     if (this.elements.penaltyOutput) {
-      const penalty = typeof metrics.penaltyPerDay === "number" ? metrics.penaltyPerDay : 0;
+      const penaltyPerHour =
+        typeof metrics.penaltyPerDay === "number" ? metrics.penaltyPerDay / 24 : 0;
       this.elements.penaltyOutput.textContent = `${this.profitFormatter.format(
-        Math.round(penalty * 1000)
-      )} / day`;
+        Math.round(penaltyPerHour * 1000)
+      )} / hr`;
     }
 
     if (this.elements.marginOutput) {
@@ -714,6 +740,53 @@ export class UIController {
       this._updateInventoryBar("diesel", storage);
       this._updateInventoryBar("jet", storage);
     }
+
+    if (this.elements.logisticsExpedite) {
+      const cooldown = logistics?.extraShipmentCooldown ?? 0;
+      const disabled = cooldown > 0.05;
+      this.elements.logisticsExpedite.disabled = disabled;
+      this.elements.logisticsExpedite.setAttribute("aria-disabled", disabled ? "true" : "false");
+      this.elements.logisticsExpedite.textContent = disabled
+        ? `Call Emergency Ship (${cooldown.toFixed(1)}h)`
+        : "Call Emergency Ship";
+      this.elements.logisticsExpedite.title = disabled
+        ? `Emergency charter crews resetting (${cooldown.toFixed(1)} hours)`
+        : "Stage an expedited marine shipment";
+    }
+
+    if (this.elements.logisticsExpand) {
+      const nextLevel = (logistics?.upgrades?.level || 0) + 1;
+      const maxed = (logistics?.upgrades?.level || 0) >= 6;
+      this.elements.logisticsExpand.disabled = maxed;
+      this.elements.logisticsExpand.setAttribute("aria-disabled", maxed ? "true" : "false");
+      this.elements.logisticsExpand.textContent = maxed
+        ? "Tank Farm Fully Expanded"
+        : `Expand Tank Farm (Lvl ${nextLevel})`;
+      this.elements.logisticsExpand.title = maxed
+        ? "All planned tank expansions complete"
+        : "Authorize capital project to expand storage";
+    }
+
+    if (this.elements.storageStatus) {
+      const pressure = logistics?.pressure || {};
+      const throttle = Math.round((pressure.throttle ?? 1) * 100);
+      const ratio = pressure.lastRatio ? Math.round(pressure.lastRatio * 100) : null;
+      const parts = [`Crude feed ${throttle}%`];
+      if (Number.isFinite(ratio)) {
+        parts.push(`tanks ${ratio}% full`);
+      }
+      if (logistics?.upgrades?.level) {
+        parts.push(`capacity lvl ${logistics.upgrades.level}`);
+      }
+      if (pressure.active) {
+        parts.push("pressure easing");
+        this.elements.storageStatus.dataset.state = "alert";
+      } else {
+        this.elements.storageStatus.dataset.state = "stable";
+      }
+      this.elements.storageStatus.textContent = parts.join(" · ");
+    }
+
     this._renderShipmentList(Array.isArray(shipments) ? shipments : [], stats || {});
   }
 
@@ -780,6 +853,9 @@ export class UIController {
     const item = document.createElement("li");
     const status = shipment.status || "pending";
     item.classList.add("shipment", status);
+    if (shipment.rush) {
+      item.classList.add("rush");
+    }
 
     const header = document.createElement("div");
     header.classList.add("shipment-header");
@@ -799,6 +875,9 @@ export class UIController {
         eta.textContent = `Overdue ${this._formatHours(Math.abs(shipment.dueIn))}`;
       } else {
         eta.textContent = "Loading";
+      }
+      if (shipment.rush) {
+        eta.textContent += " (rush)";
       }
     } else if (status === "completed") {
       eta.textContent = "Cleared";
