@@ -217,6 +217,7 @@ export class TileRenderer {
     for (const tank of this.storageMeshes.values()) {
       const level = storageLevels[tank.key] || 0;
       const capacity = storageCap[tank.key] || 1;
+      const safeCapacity = Math.max(capacity, 1e-3);
       const ratio = capacity ? clamp(level / capacity, 0, 1) : 0;
       if (tank.baseColor) {
         const color = tank.baseColor.clone().lerp(new THREE.Color(0xffffff), ratio * 0.25);
@@ -225,8 +226,8 @@ export class TileRenderer {
           tank.surface.material.color.copy(color.clone().lerp(new THREE.Color(0xffffff), 0.18));
         }
       }
-      const baseCapacity = baseCap[tank.key] || capacity || 1;
-      const capRatio = clamp(capacity / baseCapacity, 0.6, 2.8);
+      const baseCapacity = Math.max(baseCap[tank.key] || capacity || 1, 1e-3);
+      const capRatio = clamp(safeCapacity / baseCapacity, 0.6, 2.8);
       const radiusScale = clamp(Math.pow(capRatio, 0.42), 0.85, 1.55);
       const heightScale = clamp(Math.pow(capRatio, 0.6), 0.9, 1.8);
       const minFill = 0.02;
