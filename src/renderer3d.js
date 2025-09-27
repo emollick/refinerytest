@@ -215,10 +215,17 @@ export class TileRenderer {
     const storageCap = logistics.storage?.capacity || {};
     const baseCap = logistics.storage?.baseCapacity || {};
     for (const tank of this.storageMeshes.values()) {
-      const level = storageLevels[tank.key] || 0;
-      const capacity = storageCap[tank.key] || 1;
+      const rawLevel = storageLevels[tank.key];
+      const rawCapacity = storageCap[tank.key];
+      const rawBase = baseCap[tank.key];
+
+      const level = Number.isFinite(rawLevel) ? rawLevel : 0;
+      const capacity = Number.isFinite(rawCapacity) ? rawCapacity : 0;
+      const baseCapacity = Number.isFinite(rawBase) ? rawBase : capacity;
+
       const safeCapacity = Math.max(capacity, 1e-3);
-      const ratio = capacity ? clamp(level / capacity, 0, 1) : 0;
+      const safeBaseCapacity = Math.max(baseCapacity, 1e-3);
+      const ratio = clamp(level / safeCapacity, 0, 1);
       if (tank.baseColor) {
         const color = tank.baseColor.clone().lerp(new THREE.Color(0xffffff), ratio * 0.25);
         tank.fill.material.color.copy(color);
@@ -227,7 +234,7 @@ export class TileRenderer {
         }
       }
       const baseCapacity = Math.max(baseCap[tank.key] || capacity || 1, 1e-3);
-      let capRatio = safeCapacity / baseCapacity;
+      let capRatio = safeCapacity / safeBaseCapacity;
       if (!Number.isFinite(capRatio)) {
         capRatio = 1;
       }
