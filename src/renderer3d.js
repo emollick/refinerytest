@@ -232,10 +232,10 @@ export class TileRenderer {
         capRatio = 1;
       }
       const radiusScale = Number.isFinite(capRatio)
-        ? clamp(Math.pow(capRatio, 0.42), 0.85, 1.55)
+        ? clamp(Math.pow(Math.max(capRatio, 1e-3), 0.42), 0.85, 1.55)
         : 1;
       const heightScale = Number.isFinite(capRatio)
-        ? clamp(Math.pow(capRatio, 0.6), 0.9, 1.8)
+        ? clamp(Math.pow(Math.max(capRatio, 1e-3), 0.6), 0.9, 1.8)
         : 1;
       const minFill = 0.02;
       const fillRatio = Math.max(ratio, minFill);
@@ -255,14 +255,14 @@ export class TileRenderer {
       const fillRadiusScale = Number.isFinite(radiusScale) ? radiusScale * 0.86 : 0.86;
       const fillHeightScale = Number.isFinite(heightScale) ? heightScale : 1;
       tank.fill.scale.set(fillRadiusScale, Math.max(fillRatio * fillHeightScale, minFill), fillRadiusScale);
-      tank.fill.position.y = fillRatio * height / 2;
+      tank.fill.position.y = Math.max(fillRatio * height / 2, minFill * height);
       const emissiveIntensity = 0.25 + ratio * 1.5;
       tank.fill.material.emissiveIntensity = emissiveIntensity;
 
       if (tank.surface) {
         const surfaceScale = Number.isFinite(radiusScale) ? radiusScale : 1;
         tank.surface.scale.set(surfaceScale, surfaceScale, 1);
-        tank.surface.position.y = fillRatio * height;
+        tank.surface.position.y = Math.max(fillRatio * height, minFill * height * 1.2);
         tank.surface.material.opacity = 0.65 + ratio * 0.3;
         if (tank.surface.material.emissive) {
           tank.surface.material.emissiveIntensity = 0.12 + ratio * 0.6;
