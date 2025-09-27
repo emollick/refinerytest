@@ -1669,22 +1669,26 @@ function renderPrototypeNotes() {
     return;
   }
   prototypeNotes.innerHTML = "";
-  const history = document.createElement("p");
-  history.textContent =
-    "Marine terminal refresh: storage gauges glow with live product levels and ships keep to their berth so the tank farm stays clear.";
-  const placeholders = document.createElement("ul");
-  placeholders.className = "prototype-list";
+  const descriptor = document.createElement("p");
+  descriptor.textContent =
+    "SimRefinery is the Maxis Business Simulations prototype built for Chevron, mixing management play with the choreography of a live refinery.";
+  const restoration = document.createElement("p");
+  restoration.textContent =
+    "This restoration stitches together the recovered prototype, new 3D reactor visuals, and interactive overlays so the training scenario feels at home on the web.";
+  const creditIntro = document.createElement("p");
+  creditIntro.textContent = "Historical context courtesy of The Obscuritory:";
+  const credits = document.createElement("ul");
+  credits.className = "prototype-list";
   [
-    "Process legend now includes the Marine Terminal — hover to trace export lines, click to focus the dock.",
-    "Storage gauges sit beside each tank with illuminated tick marks so you can read levels at a glance.",
-    "ROAD still dispatches a convoy to relieve the fullest tank and PIPE stages a bypass; BULLDOZE schedules the turnaround window.",
-    "Use the toolbar shortcuts or the legend to navigate units; the ship lane now docks beyond the tank perimeter.",
+    "A close look at SimRefinery (Simulation category)",
+    "June 6, 2020 — Phil Salvador",
+    "The Obscuritory — Socials / Contact",
   ].forEach((line) => {
     const item = document.createElement("li");
     item.textContent = line;
-    placeholders.appendChild(item);
+    credits.appendChild(item);
   });
-  prototypeNotes.append(history, placeholders);
+  prototypeNotes.append(descriptor, restoration, creditIntro, credits);
 }
 
 function buildUnitConnectionIndex(topology) {
