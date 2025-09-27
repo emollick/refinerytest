@@ -8,6 +8,8 @@ const PRODUCT_LABELS = {
 };
 
 const HOURS_PER_DAY = 24;
+const perDayToPerHour = (value) => value / HOURS_PER_DAY;
+const perHourToPerDay = (value) => value * HOURS_PER_DAY;
 
 export class RefinerySimulation {
   constructor() {
@@ -104,7 +106,7 @@ export class RefinerySimulation {
     this.storageAlertCache = this._createStorageAlertCache();
     this.shipments = [];
     this.shipmentStats = { total: 0, onTime: 0, missed: 0 };
-    this.nextShipmentIn = 2.5;
+    this.nextShipmentIn = randomRange(8, 12);
     this.storagePressure = { active: false, throttle: 1, timer: 0, lastRatio: 0 };
     this.extraShipmentCooldown = 0;
     this.storageUpgrades = { level: 0 };
@@ -487,7 +489,7 @@ export class RefinerySimulation {
     this.storageAlertCache = this._createStorageAlertCache();
     this.shipments = [];
     this.shipmentStats = { total: 0, onTime: 0, missed: 0 };
-    this.nextShipmentIn = 2.5;
+    this.nextShipmentIn = randomRange(8, 12);
     this.storagePressure = { active: false, throttle: 1, timer: 0, lastRatio: 0 };
     this.extraShipmentCooldown = 0;
     this.storageUpgrades = { level: 0 };
@@ -582,21 +584,23 @@ export class RefinerySimulation {
     const extraOperationalCost = this._consumeOperationalCost();
 
     const scenario = this.activeScenario;
-    const crudeSetting = this.params.crudeIntake;
     const storageThrottle = this.storagePressure?.throttle ?? 1;
-    const crudeAvailable = crudeSetting * scenario.crudeMultiplier * storageThrottle;
+    const crudeDailyTarget =
+      this.params.crudeIntake * scenario.crudeMultiplier * storageThrottle;
+    const crudeAvailable = perDayToPerHour(crudeDailyTarget);
 
     const distState = this._resolveUnitState("distillation");
     const distillation = distState.unit;
     const distCapacity =
       distillation && distState.online
-        ? distillation.capacity * clamp(distState.throttle, 0, 1.2)
+        ? perDayToPerHour(distillation.capacity) * clamp(distState.throttle, 0, 1.2)
         : 0;
     const crudeThroughput = Math.min(crudeAvailable, distCapacity);
+    const crudeThroughputPerDay = perHourToPerDay(crudeThroughput);
     if (distillation) {
-      distillation.throughput = crudeThroughput;
-      distillation.utilization = distCapacity
-        ? crudeThroughput / Math.max(1, distillation.capacity)
+      distillation.throughput = crudeThroughputPerDay;
+      distillation.utilization = distillation.capacity
+        ? distillation.throughput / Math.max(1, distillation.capacity)
         : 0;
       this._updateUnitMode(distillation);
     }
@@ -658,7 +662,7 @@ export class RefinerySimulation {
     const reformer = reformerState.unit;
     const reformerCapacity =
       reformer && reformerState.online
-        ? reformer.capacity * clamp(reformerState.throttle, 0, 1.2)
+        ? perDayToPerHour(reformer.capacity) * clamp(reformerState.throttle, 0, 1.2)
         : 0;
     const reformFeed = Math.min(
       naphthaPool,
@@ -666,8 +670,8 @@ export class RefinerySimulation {
     );
     naphthaPool -= reformFeed;
     if (reformer) {
-      reformer.throughput = reformFeed;
-      reformer.utilization = reformerCapacity > 0 ? reformFeed / reformerCapacity : 0;
+      reformer.throughput = perHourToPerDay(reformFeed);
+      reformer.utilization = reformer.capacity > 0 ? reformer.throughput / reformer.capacity : 0;
       this._updateUnitMode(reformer);
     }
 
@@ -681,7 +685,9 @@ export class RefinerySimulation {
     const fccState = this._resolveUnitState("fcc");
     const fcc = fccState.unit;
     const fccCapacity =
-      fcc && fccState.online ? fcc.capacity * clamp(fccState.throttle, 0, 1.2) : 0;
+      fcc && fccState.online
+        ? perDayToPerHour(fcc.capacity) * clamp(fccState.throttle, 0, 1.2)
+        : 0;
     const heavyAvailableForFcc = heavyPool + residPool * 0.6;
     const fccFeed = Math.min(
       heavyAvailableForFcc,
@@ -693,8 +699,8 @@ export class RefinerySimulation {
     residPool -= residUsedByFcc;
 
     if (fcc) {
-      fcc.throughput = fccFeed;
-      fcc.utilization = fccCapacity > 0 ? fccFeed / fccCapacity : 0;
+      fcc.throughput = perHourToPerDay(fccFeed);
+      fcc.utilization = fcc.capacity > 0 ? fcc.throughput / fcc.capacity : 0;
       this._updateUnitMode(fcc);
     }
 
@@ -712,7 +718,7 @@ export class RefinerySimulation {
     const hydrocracker = hydroState.unit;
     const hydroCapacity =
       hydrocracker && hydroState.online
-        ? hydrocracker.capacity * clamp(hydroState.throttle, 0, 1.2)
+        ? perDayToPerHour(hydrocracker.capacity) * clamp(hydroState.throttle, 0, 1.2)
         : 0;
     const hydroFeedAvailable = heavyPool + residPool + dieselPool * 0.25;
     const hydroFeed = Math.min(
@@ -728,8 +734,8 @@ export class RefinerySimulation {
     dieselPool -= dieselUsedHydro;
 
     if (hydrocracker) {
-      hydrocracker.throughput = hydroFeed;
-      hydrocracker.utilization = hydroCapacity > 0 ? hydroFeed / hydroCapacity : 0;
+      hydrocracker.throughput = perHourToPerDay(hydroFeed);
+      hydrocracker.utilization = hydrocracker.capacity > 0 ? hydrocracker.throughput / hydrocracker.capacity : 0;
       this._updateUnitMode(hydrocracker);
     }
 
@@ -747,7 +753,7 @@ export class RefinerySimulation {
     const alkylation = alkylationState.unit;
     const alkCapacity =
       alkylation && alkylationState.online
-        ? alkylation.capacity * clamp(alkylationState.throttle, 0, 1.2)
+        ? perDayToPerHour(alkylation.capacity) * clamp(alkylationState.throttle, 0, 1.2)
         : 0;
     const alkFeed = Math.min(
       lpgPool,
@@ -756,8 +762,8 @@ export class RefinerySimulation {
     lpgPool -= alkFeed;
 
     if (alkylation) {
-      alkylation.throughput = alkFeed;
-      alkylation.utilization = alkCapacity > 0 ? alkFeed / alkCapacity : 0;
+      alkylation.throughput = perHourToPerDay(alkFeed);
+      alkylation.utilization = alkylation.capacity > 0 ? alkylation.throughput / alkylation.capacity : 0;
       this._updateUnitMode(alkylation);
     }
 
@@ -770,12 +776,14 @@ export class RefinerySimulation {
     const sulfurState = this._resolveUnitState("sulfur");
     const sulfur = sulfurState.unit;
     const sulfurCapacity =
-      sulfur && sulfurState.online ? sulfur.capacity * clamp(sulfurState.throttle, 0, 1.2) : 0;
+      sulfur && sulfurState.online
+        ? perDayToPerHour(sulfur.capacity) * clamp(sulfurState.throttle, 0, 1.2)
+        : 0;
     const sulfurFeed = Math.min(residPool + heavyPool, sulfurCapacity);
     const sulfurRemoved = sulfurFeed * (0.55 + this.params.environment * 0.4);
     if (sulfur) {
-      sulfur.throughput = sulfurFeed;
-      sulfur.utilization = sulfurCapacity > 0 ? sulfurFeed / sulfurCapacity : 0;
+      sulfur.throughput = perHourToPerDay(sulfurFeed);
+      sulfur.utilization = sulfur.capacity > 0 ? sulfur.throughput / sulfur.capacity : 0;
       this._updateUnitMode(sulfur);
     }
     residPool -= sulfurFeed * 0.6;
@@ -829,7 +837,10 @@ export class RefinerySimulation {
     });
 
     const penalty = incidentsRisk.incidentPenalty + logisticsReport.penalty;
-    const fixedOverhead = this._calculateFixedOverhead({ crudeThroughput, scenario });
+    const fixedOverhead = this._calculateFixedOverhead({
+      crudeThroughput: crudeThroughputPerDay,
+      scenario,
+    });
     const marketConditions = this._updateMarketConditions({
       scenario,
       incidents: incidentsRisk,
@@ -858,10 +869,10 @@ export class RefinerySimulation {
     const profitPerHour = revenuePerHour - expensePerHour - penaltyPerHour;
     const profitPerDay = profitPerHour * HOURS_PER_DAY;
 
-    this.metrics.gasoline = this._round(result.gasoline);
-    this.metrics.diesel = this._round(result.diesel);
-    this.metrics.jet = this._round(result.jet);
-    this.metrics.lpg = this._round(result.lpg);
+    this.metrics.gasoline = this._round(perHourToPerDay(result.gasoline));
+    this.metrics.diesel = this._round(perHourToPerDay(result.diesel));
+    this.metrics.jet = this._round(perHourToPerDay(result.jet));
+    this.metrics.lpg = this._round(perHourToPerDay(result.lpg));
     this.metrics.crudeCostPerBbl = crudeCostPerBbl;
     this.metrics.profitPerHour = profitPerHour;
     this.metrics.revenuePerDay = revenuePerHour * HOURS_PER_DAY;
@@ -903,7 +914,7 @@ export class RefinerySimulation {
 
     this._updateScorecard({
       profitPerHour,
-      crudeThroughput,
+      crudeThroughput: crudeThroughputPerDay,
       incidents: incidentsRisk.incidents,
       reliability: this.metrics.reliability,
       carbon: this.metrics.carbon,
@@ -1365,25 +1376,63 @@ export class RefinerySimulation {
   }
 
   _scheduleShipment() {
-    const productPool = ["gasoline", "gasoline", "diesel", "diesel", "jet"];
-    const product = productPool[Math.floor(Math.random() * productPool.length)];
+    const products = ["gasoline", "diesel", "jet"];
+    const weighted = [];
+    let fallbackProduct = null;
+    let highestRatio = 0;
 
+    products.forEach((product) => {
+      const capacity = this.storage.capacity[product] || 0;
+      const currentLevel = this.storage.levels[product] || 0;
+      const ratio = capacity ? clamp(currentLevel / capacity, 0, 1.2) : 0;
+      if (ratio > highestRatio) {
+        highestRatio = ratio;
+        fallbackProduct = product;
+      }
+      if (ratio >= 0.55) {
+        const weight = ratio >= 1 ? 4 : ratio >= 0.9 ? 3 : 2;
+        for (let i = 0; i < weight; i += 1) {
+          weighted.push(product);
+        }
+      }
+    });
+
+    if (weighted.length === 0 && fallbackProduct && highestRatio >= 0.45) {
+      weighted.push(fallbackProduct);
+    }
+
+    if (weighted.length === 0) {
+      this.nextShipmentIn = Math.max(this.nextShipmentIn, randomRange(4, 7));
+      return false;
+    }
+
+    const product =
+      weighted[Math.floor(Math.random() * weighted.length)] || fallbackProduct || "gasoline";
     const capacity = this.storage.capacity[product] || 120;
     const currentLevel = this.storage.levels[product] || 0;
     const utilization = capacity ? clamp(currentLevel / capacity, 0, 1.2) : 0;
+    const available = Math.max(0, currentLevel);
 
-    const baseShare = product === "jet" ? 0.22 : product === "diesel" ? 0.28 : 0.32;
-    const baseVolume = capacity * baseShare;
-    const urgency = utilization > 0.9 ? 0.55 : utilization > 0.8 ? 0.25 : 0;
-    const volume = Math.max(
-      24,
-      Math.round(randomRange(baseVolume * 0.65, baseVolume * 1.1) * (1 + urgency * 0.45))
-    );
+    if (available < 18) {
+      this.nextShipmentIn = Math.max(this.nextShipmentIn, randomRange(3, 6));
+      return false;
+    }
 
-    const baseWindowHours = product === "jet" ? 7.5 : 6.5;
-    const windowMin = baseWindowHours * (1 - urgency * 0.5);
-    const windowMax = baseWindowHours * (1 - urgency * 0.25) + 2;
-    const window = clamp(randomRange(windowMin, windowMax), 3.5, 9);
+    const baseShare = product === "jet" ? 0.24 : product === "diesel" ? 0.28 : 0.32;
+    const urgency = utilization > 1 ? 0.7 : utilization > 0.95 ? 0.5 : utilization > 0.85 ? 0.28 : 0.12;
+    const drawFraction = clamp(0.4 + urgency * 0.5, 0.3, 0.85);
+    const ceiling = capacity * baseShare * (1 + urgency * 0.45);
+    const volume = Math.round(clamp(available * drawFraction, 20, ceiling));
+
+    if (!Number.isFinite(volume) || volume <= 0) {
+      this.nextShipmentIn = Math.max(this.nextShipmentIn, randomRange(4, 6));
+      return false;
+    }
+
+    const baseWindowHours = product === "jet" ? 8.5 : 7.2;
+    const windowMin = baseWindowHours - urgency * 4.2;
+    const windowMax = baseWindowHours + 1.8 - urgency * 2.2;
+    const window = clamp(randomRange(windowMin, windowMax), 4.5, 12);
     const shipment = {
       id: `ship-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
       product,
@@ -1401,6 +1450,7 @@ export class RefinerySimulation {
         1
       )} h.`
     );
+    return true;
   }
 
   _resolveShipment(shipment, prices, report) {
@@ -1489,13 +1539,17 @@ export class RefinerySimulation {
     if (maxRatio > 0.82) {
       this.nextShipmentIn -= hours * (1 + (maxRatio - 0.82) * 6);
       if (maxRatio > 0.95) {
-        this.nextShipmentIn = Math.min(this.nextShipmentIn, 0.75);
+        this.nextShipmentIn = Math.min(this.nextShipmentIn, 1.5);
       }
+    } else if (maxRatio < 0.5) {
+      const relief = 0.45 + (0.5 - maxRatio) * 3.2;
+      this.nextShipmentIn += hours * relief;
     }
+    this.nextShipmentIn = Math.min(this.nextShipmentIn, 24);
 
     if (this._countPendingShipments() < 3 && this.nextShipmentIn <= 0) {
-      this._scheduleShipment();
-      this.nextShipmentIn = randomRange(2.5, 5.5);
+      const scheduled = this._scheduleShipment();
+      this.nextShipmentIn = scheduled ? randomRange(9, 16) : randomRange(5, 9);
     }
 
     const report = {
@@ -1795,10 +1849,13 @@ export class RefinerySimulation {
   _calculateFixedOverhead({ crudeThroughput, scenario }) {
     const maintenancePenalty = scenario?.maintenancePenalty || 0;
     const base = 620 + maintenancePenalty * 320;
-    const throughputLoad = crudeThroughput * (4.8 + maintenancePenalty * 2.6);
+    const throughputDaily = Math.max(crudeThroughput || 0, 0);
+    const throughputLoad = throughputDaily * (4.8 + maintenancePenalty * 2.6);
     const maintenanceFactor = 0.6 + (this.params.maintenance || 0) * 0.9;
     const safetyFactor = 0.45 + (this.params.safety || 0) * 0.7;
-    return (base + throughputLoad) * (0.55 + maintenanceFactor * 0.35 + safetyFactor * 0.25);
+    const overheadPerDay =
+      (base + throughputLoad) * (0.55 + maintenanceFactor * 0.35 + safetyFactor * 0.25);
+    return overheadPerDay / HOURS_PER_DAY;
   }
 
   _updateMarketConditions({ scenario, incidents, logistics }) {
@@ -1876,7 +1933,7 @@ export class RefinerySimulation {
   }
 
   _calculateMarketDemand(hours, scenario) {
-    const baseDemand = { gasoline: 58, diesel: 46, jet: 34 };
+    const baseDemand = { gasoline: 55, diesel: 30, jet: 14 };
     const focus = clamp(this.params.productFocus, 0, 1);
     const focusShift = focus - 0.5;
     const reliability = clamp(this.metrics.reliability ?? 1, 0.4, 1.2);
@@ -1897,7 +1954,7 @@ export class RefinerySimulation {
         (1 - Math.abs(focusShift) * 0.25),
     };
 
-    const stability = 0.78 + reliability * 0.32;
+    const stability = 0.7 + reliability * 0.2;
     const adjusted = {};
     Object.entries(demand).forEach(([product, perDay]) => {
       const scaled = clamp(perDay * stability * gradeFactor, 0, perDay * 1.6);

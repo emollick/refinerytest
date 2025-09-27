@@ -3,6 +3,7 @@ import { UIController } from "./ui.js?v=3";
 import { TileRenderer } from "./renderer3d.js?v=3";
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+const HOURS_PER_DAY = 24;
 
 const mapViewport = document.getElementById("map-viewport");
 let sceneContainer = document.getElementById("scene-container");
@@ -121,7 +122,7 @@ const pipelineConfigs = [
   {
     id: "toReformer",
     metric: "toReformer",
-    capacity: 70,
+    capacity: 70 / HOURS_PER_DAY,
     color: 0x6fc2ff,
     phase: 0,
     path: [
@@ -134,7 +135,7 @@ const pipelineConfigs = [
   {
     id: "toCracker",
     metric: "toCracker",
-    capacity: 90,
+    capacity: 90 / HOURS_PER_DAY,
     color: 0xf7b25c,
     phase: 1.3,
     path: [
@@ -147,7 +148,7 @@ const pipelineConfigs = [
   {
     id: "toHydrocracker",
     metric: "toHydrocracker",
-    capacity: 70,
+    capacity: 70 / HOURS_PER_DAY,
     color: 0x8ee2c4,
     phase: 2.2,
     path: [
@@ -159,7 +160,7 @@ const pipelineConfigs = [
   {
     id: "toAlkylation",
     metric: "toAlkylation",
-    capacity: 45,
+    capacity: 45 / HOURS_PER_DAY,
     color: 0xc5a1ff,
     phase: 2.9,
     path: [
@@ -171,7 +172,7 @@ const pipelineConfigs = [
   {
     id: "toExport",
     metric: "toExport",
-    capacity: 160,
+    capacity: 160 / HOURS_PER_DAY,
     color: 0x9ec8ff,
     phase: 3.6,
     path: [
