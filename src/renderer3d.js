@@ -227,29 +227,41 @@ export class TileRenderer {
         }
       }
       const baseCapacity = Math.max(baseCap[tank.key] || capacity || 1, 1e-3);
-      const capRatio = clamp(safeCapacity / baseCapacity, 0.6, 2.8);
-      const radiusScale = clamp(Math.pow(capRatio, 0.42), 0.85, 1.55);
-      const heightScale = clamp(Math.pow(capRatio, 0.6), 0.9, 1.8);
+      let capRatio = safeCapacity / baseCapacity;
+      if (!Number.isFinite(capRatio)) {
+        capRatio = 1;
+      }
+      const radiusScale = Number.isFinite(capRatio)
+        ? clamp(Math.pow(capRatio, 0.42), 0.85, 1.55)
+        : 1;
+      const heightScale = Number.isFinite(capRatio)
+        ? clamp(Math.pow(capRatio, 0.6), 0.9, 1.8)
+        : 1;
       const minFill = 0.02;
       const fillRatio = Math.max(ratio, minFill);
-      const height = tank.baseHeight * heightScale;
+      const height = (tank.baseHeight || 14) * heightScale;
 
       if (tank.shell) {
-        tank.shell.scale.set(radiusScale, heightScale, radiusScale);
+        const shellRadiusScale = Number.isFinite(radiusScale) ? radiusScale : 1;
+        const shellHeightScale = Number.isFinite(heightScale) ? heightScale : 1;
+        tank.shell.scale.set(shellRadiusScale, shellHeightScale, shellRadiusScale);
         tank.shell.position.y = height / 2;
       }
       if (tank.lid) {
-        tank.lid.scale.set(radiusScale, radiusScale, 1);
+        const lidScale = Number.isFinite(radiusScale) ? radiusScale : 1;
+        tank.lid.scale.set(lidScale, lidScale, 1);
         tank.lid.position.y = height + 0.02;
       }
-      const fillRadiusScale = radiusScale * 0.86;
-      tank.fill.scale.set(fillRadiusScale, fillRatio * heightScale, fillRadiusScale);
+      const fillRadiusScale = Number.isFinite(radiusScale) ? radiusScale * 0.86 : 0.86;
+      const fillHeightScale = Number.isFinite(heightScale) ? heightScale : 1;
+      tank.fill.scale.set(fillRadiusScale, Math.max(fillRatio * fillHeightScale, minFill), fillRadiusScale);
       tank.fill.position.y = fillRatio * height / 2;
       const emissiveIntensity = 0.25 + ratio * 1.5;
       tank.fill.material.emissiveIntensity = emissiveIntensity;
 
       if (tank.surface) {
-        tank.surface.scale.set(radiusScale, radiusScale, 1);
+        const surfaceScale = Number.isFinite(radiusScale) ? radiusScale : 1;
+        tank.surface.scale.set(surfaceScale, surfaceScale, 1);
         tank.surface.position.y = fillRatio * height;
         tank.surface.material.opacity = 0.65 + ratio * 0.3;
         if (tank.surface.material.emissive) {
