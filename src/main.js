@@ -1483,11 +1483,64 @@ function buildProcessLegend() {
   const legend = document.createElement("div");
   legend.id = "process-legend";
   const heading = document.createElement("h4");
-  heading.textContent = "Process Flow";
+  heading.textContent = "Process & Logistics";
   legend.appendChild(heading);
+  const helper = document.createElement("p");
+  helper.className = "legend-hint";
+  helper.textContent = "Hover to trace connections, click to center the view.";
+  legend.appendChild(helper);
   const list = document.createElement("ol");
-  const sequence = ["distillation", "reformer", "fcc", "hydrocracker", "alkylation", "sulfur"];
+  const logisticAnchor = {
+    id: "logistics",
+    name: "Marine Terminal",
+    summary: "Balances product tanks and dispatches cargo briefs to ships.",
+    pipelines: ["toExport"],
+  };
+  const sequence = ["distillation", "reformer", "fcc", "hydrocracker", "alkylation", "sulfur", logisticAnchor.id];
   sequence.forEach((unitId) => {
+    if (unitId === logisticAnchor.id) {
+      const item = document.createElement("li");
+      item.dataset.role = "logistics";
+      item.setAttribute("role", "button");
+      item.tabIndex = 0;
+      const name = document.createElement("span");
+      name.className = "process-step-name";
+      name.textContent = logisticAnchor.name;
+      item.appendChild(name);
+      const summary = document.createElement("small");
+      summary.className = "process-step-summary";
+      summary.textContent = logisticAnchor.summary;
+      item.appendChild(summary);
+      const highlight = () => renderer.setHighlightedPipelines(logisticAnchor.pipelines);
+      const reset = () => {
+        if (selectedUnitId) {
+          highlightPipelinesForUnit(selectedUnitId);
+        } else {
+          clearPipelineHighlight();
+        }
+      };
+      item.addEventListener("mouseenter", highlight);
+      item.addEventListener("focus", highlight);
+      item.addEventListener("mouseleave", reset);
+      item.addEventListener("blur", reset);
+      item.addEventListener("click", () => {
+        setSelectedUnit(null);
+        ui.selectUnit(null);
+        renderer.focusOnLogistics({ onlyIfVisible: true });
+        renderer.setHighlightedPipelines(logisticAnchor.pipelines);
+      });
+      item.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          setSelectedUnit(null);
+          ui.selectUnit(null);
+          renderer.focusOnLogistics({ onlyIfVisible: false });
+          renderer.setHighlightedPipelines(logisticAnchor.pipelines);
+        }
+      });
+      list.appendChild(item);
+      return;
+    }
     const entry = processTopology[unitId];
     if (!entry) {
       return;
@@ -1497,9 +1550,11 @@ function buildProcessLegend() {
     item.setAttribute("role", "button");
     item.tabIndex = 0;
     const name = document.createElement("span");
+    name.className = "process-step-name";
     name.textContent = entry.name || unitId;
     item.appendChild(name);
     const summary = document.createElement("small");
+    summary.className = "process-step-summary";
     summary.textContent = entry.summary || "";
     item.appendChild(summary);
     item.addEventListener("mouseenter", () => highlightPipelinesForUnit(unitId));
@@ -1615,14 +1670,14 @@ function renderPrototypeNotes() {
   prototypeNotes.innerHTML = "";
   const history = document.createElement("p");
   history.textContent =
-    "Recovered Richmond interface now wires convoy drills, pipeline bypasses, and scenario loads directly into the edit console.";
+    "Marine terminal refresh: storage gauges glow with live product levels and ships keep to their berth so the tank farm stays clear.";
   const placeholders = document.createElement("ul");
   placeholders.className = "prototype-list";
   [
-    "Session → Load Old/New drop you into curated Chevron training scenarios with different bottlenecks to solve.",
-    "ROAD dispatches a truck convoy to bleed down whichever product tanks are overflowing the most.",
-    "PIPE stages a temporary bypass for the selected unit’s feed, while BULLDOZE schedules a turnaround to restore integrity.",
-    "The refinery map stays locked to the SimCity-style tile board — click a unit to inspect its connections and controls.",
+    "Process legend now includes the Marine Terminal — hover to trace export lines, click to focus the dock.",
+    "Storage gauges sit beside each tank with illuminated tick marks so you can read levels at a glance.",
+    "ROAD still dispatches a convoy to relieve the fullest tank and PIPE stages a bypass; BULLDOZE schedules the turnaround window.",
+    "Use the toolbar shortcuts or the legend to navigate units; the ship lane now docks beyond the tank perimeter.",
   ].forEach((line) => {
     const item = document.createElement("li");
     item.textContent = line;

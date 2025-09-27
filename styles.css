@@ -895,6 +895,13 @@ body {
   color: rgba(164, 208, 255, 0.75);
 }
 
+#process-legend .legend-hint {
+  margin: 0 0 6px;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  color: rgba(190, 220, 255, 0.62);
+}
+
 #process-legend ol {
   list-style: none;
   margin: 0;
@@ -911,6 +918,11 @@ body {
   cursor: pointer;
   background: rgba(14, 22, 35, 0.65);
   transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+#process-legend li[data-role="logistics"] {
+  border-style: dashed;
+  background: rgba(18, 30, 46, 0.72);
 }
 
 #process-legend li:hover {

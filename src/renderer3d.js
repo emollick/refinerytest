@@ -80,6 +80,10 @@ export class TileRenderer {
     this.waterMesh = null;
     this.dockMesh = null;
     this.dockLight = null;
+    this.dockApron = null;
+    this.quayMesh = null;
+    this.groundDetailLayer = null;
+    this.groundDetailMaterials = [];
 
     this.deviceScaleX = 1;
     this.deviceScaleY = 1;
@@ -222,20 +226,37 @@ export class TileRenderer {
       const ratio = clamp(level / capacity, 0, 1);
 
       if (tank.indicator) {
-        const indicatorScale = clamp(ratio, 0.05, 1);
+        const indicatorScale = clamp(ratio, 0.02, 1);
         tank.indicator.scale.y = indicatorScale;
-        tank.indicator.material.opacity = 0.35 + ratio * 0.45;
-        tank.indicator.position.y = (tank.baseHeight || 14) * indicatorScale * 0.45 + (tank.baseHeight || 14) * 0.05;
+        tank.indicator.material.opacity = 0.52 + ratio * 0.38;
         const gaugeColor = (tank.baseColor || new THREE.Color(0xffffff)).clone();
-        gaugeColor.lerp(new THREE.Color(0xffffff), ratio * 0.3);
+        gaugeColor.lerp(new THREE.Color(0xffffff), ratio * 0.25);
         tank.indicator.material.color.copy(gaugeColor);
         tank.indicator.visible = true;
+        tank.indicator.position.y = 0;
       }
 
       if (tank.shell?.material) {
         const baseColor = tank.shell.material.userData?.baseColor || tank.shell.material.color;
         tank.shell.material.color.copy(baseColor).lerp(new THREE.Color(0xffffff), ratio * 0.1);
         tank.shell.material.emissiveIntensity = 0.08 + ratio * 0.3;
+      }
+
+      if (tank.gaugeOverlay) {
+        tank.gaugeOverlay.material.opacity = 0.08 + ratio * 0.08;
+      }
+
+      if (Array.isArray(tank.gaugeTickMaterials)) {
+        const tickBaseColor = (tank.baseColor || new THREE.Color(0xffffff)).clone();
+        tank.gaugeTickMaterials.forEach((material, index) => {
+          if (!material || !material.color) {
+            return;
+          }
+          const emphasis = ratio >= index / Math.max(tank.gaugeTickMaterials.length - 1, 1) ? 0.35 : 0.0;
+          const tint = tickBaseColor.clone().lerp(new THREE.Color(0xffffff), 0.65 + emphasis);
+          material.color.copy(tint);
+          material.opacity = 0.22 + emphasis * 0.9;
+        });
       }
 
       if (tank.label) {
@@ -250,13 +271,14 @@ export class TileRenderer {
       const metricValue = flows[pipeline.metric] || 0;
       const ratio = pipeline.capacity ? clamp(metricValue / pipeline.capacity, 0, 2) : 0;
       const highlighted = this.highlightedPipelines.has(pipelineId);
-      const baseIntensity = highlighted ? 0.4 : 0.14;
-      const dynamicIntensity = this.flowVisible ? ratio * (highlighted ? 2.2 : 1.4) : 0.05;
-      const wave = 0.08 + Math.sin(this.time * 3 + pipeline.phase) * 0.06;
+      const baseIntensity = highlighted ? 0.38 : 0.16;
+      const dynamicIntensity = this.flowVisible ? ratio * (highlighted ? 1.8 : 1.2) : 0.04;
+      const oscillation = this.flowVisible ? Math.sin(this.time * 1.6 + pipeline.phase) * 0.015 : 0;
+      const glowScale = 1 + ratio * 0.1 + (highlighted ? 0.06 : 0) + oscillation;
 
-      pipeline.mesh.material.emissiveIntensity = baseIntensity + dynamicIntensity * 0.6;
-      pipeline.glow.material.emissiveIntensity = this.flowVisible ? baseIntensity * 0.8 + dynamicIntensity : 0.0;
-      pipeline.glow.scale.setScalar(1 + ratio * 0.12 + wave + (highlighted ? 0.08 : 0));
+      pipeline.mesh.material.emissiveIntensity = baseIntensity + dynamicIntensity * 0.5;
+      pipeline.glow.material.emissiveIntensity = this.flowVisible ? baseIntensity * 0.6 + dynamicIntensity * 0.9 : 0.0;
+      pipeline.glow.scale.setScalar(glowScale);
     }
 
     if (this.pointerMesh?.visible) {
@@ -377,6 +399,22 @@ export class TileRenderer {
     this._updateCamera();
   }
 
+  focusOnLogistics({ onlyIfVisible = false } = {}) {
+    if (!this.shipLane?.dock) {
+      return;
+    }
+    const target = this.shipLane.dock.clone();
+    if (onlyIfVisible) {
+      const projected = target.clone().project(this.camera);
+      const onScreen = projected.x >= -0.7 && projected.x <= 0.7 && projected.y >= -0.7 && projected.y <= 0.7;
+      if (onScreen) {
+        return;
+      }
+    }
+    this.cameraTarget.lerp(target, 0.6);
+    this._updateCamera();
+  }
+
   _computeBounds() {
     const xs = [];
     const ys = [];
@@ -470,12 +508,14 @@ export class TileRenderer {
 
     this._createUnits();
     this._createPipelines();
+    this._createGroundDetails();
     this._createStorage();
     this._createLogisticsZone();
   }
 
   _createUnits() {
     const footprintScale = this.tileScale * 0.82;
+    const palette = this._getPalette();
     for (const def of this.unitDefs) {
       const centerX = def.tileX + def.width / 2;
       const centerY = def.tileY + def.height / 2;
@@ -487,6 +527,19 @@ export class TileRenderer {
       const baseWidth = Math.max(def.width * footprintScale, this.tileScale * 0.8);
       const baseDepth = Math.max(def.height * footprintScale, this.tileScale * 0.8);
       const baseHeight = 6 + def.height * 1.4;
+
+      const padGeometry = new THREE.PlaneGeometry(baseWidth * 1.28, baseDepth * 1.28, 1, 1);
+      const padMaterial = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(palette.ground || 0x1b2736).lerp(new THREE.Color(0x283749), 0.4),
+        metalness: 0.12,
+        roughness: 0.88,
+        transparent: true,
+        opacity: 0.9,
+      });
+      const pad = new THREE.Mesh(padGeometry, padMaterial);
+      pad.rotation.x = -Math.PI / 2;
+      pad.position.y = 0.02;
+      group.add(pad);
 
       const bodyGeometry = new THREE.BoxGeometry(baseWidth, baseHeight, baseDepth);
       const bodyMaterial = new THREE.MeshStandardMaterial({
@@ -545,6 +598,8 @@ export class TileRenderer {
         indicator,
         highlight,
         label,
+        pad,
+        padMaterial,
         baseColor: new THREE.Color(def.color),
         accentColor: new THREE.Color(def.accent),
       });
@@ -666,6 +721,125 @@ export class TileRenderer {
     return { x, y };
   }
 
+  _createGroundDetails() {
+    if (this.groundDetailLayer) {
+      this.scene.remove(this.groundDetailLayer);
+      this.groundDetailLayer.traverse((child) => {
+        if (child.material?.dispose) {
+          child.material.dispose();
+        }
+        if (child.geometry?.dispose) {
+          child.geometry.dispose();
+        }
+      });
+    }
+    this.groundDetailMaterials = [];
+
+    const group = new THREE.Group();
+    group.name = "ground-decoration";
+
+    const palette = this._getPalette();
+
+    const apronWidth = this.tileScale * (this.mapSpan.width + 6.5);
+    const apronDepth = this.tileScale * 3.4;
+    const apronGeometry = new THREE.PlaneGeometry(apronWidth, apronDepth);
+    const apronMaterial = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(palette.ground).lerp(new THREE.Color(0x1f2c3b), 0.28),
+      metalness: 0.18,
+      roughness: 0.82,
+      transparent: true,
+      opacity: 0.92,
+    });
+    apronMaterial.userData.role = "apron";
+    const apron = new THREE.Mesh(apronGeometry, apronMaterial);
+    apron.rotation.x = -Math.PI / 2;
+    const apronTileX = this.mapBounds.maxX + 3.8;
+    const apronTileY = this.mapBounds.minY + this.mapSpan.height + 1.6;
+    apron.position.copy(this._tileToWorld(apronTileX, apronTileY, 0));
+    apron.position.y = 0.015;
+    apron.receiveShadow = false;
+    group.add(apron);
+    this.dockApron = apronMaterial;
+    this.groundDetailMaterials.push(apronMaterial);
+
+    const latticeMinX = this.mapBounds.minX - 1.5;
+    const latticeMaxX = this.mapBounds.maxX + 6.2;
+    const latticeMinY = this.mapBounds.minY - 1.6;
+    const latticeMaxY = this.mapBounds.maxY + 3.2;
+    const latticeStep = 1.6;
+    const latticePositions = [];
+    for (let x = latticeMinX; x <= latticeMaxX; x += latticeStep) {
+      const start = this._tileToWorld(x, latticeMinY, 0.018);
+      const end = this._tileToWorld(x, latticeMaxY, 0.018);
+      latticePositions.push(start.x, 0.018, start.z, end.x, 0.018, end.z);
+    }
+    for (let y = latticeMinY; y <= latticeMaxY; y += latticeStep) {
+      const start = this._tileToWorld(latticeMinX, y, 0.018);
+      const end = this._tileToWorld(latticeMaxX, y, 0.018);
+      latticePositions.push(start.x, 0.018, start.z, end.x, 0.018, end.z);
+    }
+    if (latticePositions.length > 0) {
+      const latticeGeometry = new THREE.BufferGeometry();
+      latticeGeometry.setAttribute("position", new THREE.Float32BufferAttribute(latticePositions, 3));
+      const latticeMaterial = new THREE.LineBasicMaterial({
+        color: new THREE.Color(palette.gridMinor || 0x233244).lerp(new THREE.Color(0x415064), 0.35),
+        transparent: true,
+        opacity: 0.28,
+        linewidth: 1,
+      });
+      latticeMaterial.userData.role = "lattice";
+      const lattice = new THREE.LineSegments(latticeGeometry, latticeMaterial);
+      lattice.position.y = 0.01;
+      group.add(lattice);
+      this.groundDetailMaterials.push(latticeMaterial);
+    }
+
+    const spineMaterial = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(0x28384c).lerp(new THREE.Color(palette.gridMajor || 0x2e3f55), 0.25),
+      metalness: 0.24,
+      roughness: 0.68,
+      transparent: true,
+      opacity: 0.94,
+    });
+    spineMaterial.userData.role = "spine";
+    const spineGeometry = new THREE.BoxGeometry(this.tileScale * (this.mapSpan.width + 1.5), 0.12, this.tileScale * 0.7);
+    const spine = new THREE.Mesh(spineGeometry, spineMaterial);
+    spine.position.copy(this._tileToWorld(this.mapCenter.x, this.mapBounds.maxY + 0.6, 0));
+    spine.position.y = 0.06;
+    group.add(spine);
+    this.groundDetailMaterials.push(spineMaterial);
+
+    const corridorMaterial = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(0x32455c).lerp(new THREE.Color(palette.gridMajor || 0x2e3f55), 0.15),
+      metalness: 0.22,
+      roughness: 0.72,
+      transparent: true,
+      opacity: 0.96,
+    });
+    corridorMaterial.userData.role = "corridor";
+    this.groundDetailMaterials.push(corridorMaterial);
+    const corridorTargetY = this.mapBounds.maxY + 0.6;
+    this.unitDefs.forEach((def) => {
+      const centerX = def.tileX + def.width / 2;
+      const centerY = def.tileY + def.height / 2;
+      const deltaY = corridorTargetY - centerY;
+      if (Math.abs(deltaY) < 0.05) {
+        return;
+      }
+      const length = Math.abs(deltaY) * this.tileScale;
+      const corridorGeometry = new THREE.BoxGeometry(this.tileScale * 0.42, 0.08, length);
+      const corridor = new THREE.Mesh(corridorGeometry, corridorMaterial.clone());
+      corridor.material.userData.role = "corridor";
+      corridor.position.copy(this._tileToWorld(centerX, corridorTargetY - deltaY / 2, 0));
+      corridor.position.y = 0.05;
+      group.add(corridor);
+      this.groundDetailMaterials.push(corridor.material);
+    });
+
+    this.scene.add(group);
+    this.groundDetailLayer = group;
+  }
+
   _createStorage() {
     const spanX = this.mapBounds.maxX - this.mapBounds.minX;
     const baseX = this.mapBounds.maxX + 1.8;
@@ -701,19 +875,64 @@ export class TileRenderer {
       lid.position.y = height + 0.02;
       group.add(lid);
 
-      const gaugeGeometry = new THREE.PlaneGeometry(radius * 0.55, height * 0.85);
-      const gaugeMaterial = new THREE.MeshBasicMaterial({
+      const gaugeGroup = new THREE.Group();
+      gaugeGroup.position.set(radius + 0.6, 0.12, 0);
+      gaugeGroup.rotation.y = Math.PI / 2;
+      group.add(gaugeGroup);
+
+      const gaugeHeight = height * 0.84;
+      const gaugeWidth = radius * 0.6;
+
+      const frameGeometry = new THREE.PlaneGeometry(gaugeWidth * 1.18, gaugeHeight + 0.4);
+      const frameMaterial = new THREE.MeshBasicMaterial({
+        color: palette.storageShell ? new THREE.Color(palette.storageShell).lerp(new THREE.Color(0x0c121b), 0.65) : 0x0c121b,
+        transparent: true,
+        opacity: 0.9,
+      });
+      const frame = new THREE.Mesh(frameGeometry, frameMaterial);
+      frame.position.set(0, gaugeHeight * 0.5 + 0.12, -0.01);
+      gaugeGroup.add(frame);
+
+      const fillGeometry = new THREE.PlaneGeometry(gaugeWidth, gaugeHeight);
+      fillGeometry.translate(0, gaugeHeight / 2, 0);
+      const fillMaterial = new THREE.MeshBasicMaterial({
         color: entry.color,
         transparent: true,
-        opacity: 0.45,
-        depthWrite: false,
+        opacity: 0.78,
         side: THREE.DoubleSide,
       });
-      const gauge = new THREE.Mesh(gaugeGeometry, gaugeMaterial);
-      gauge.position.set(radius + 0.35, height * 0.45, 0);
-      gauge.rotation.y = Math.PI / 2;
-      gauge.scale.y = 0.5;
-      group.add(gauge);
+      const fill = new THREE.Mesh(fillGeometry, fillMaterial);
+      fill.position.z = 0.01;
+      gaugeGroup.add(fill);
+
+      const overlayGeometry = new THREE.PlaneGeometry(gaugeWidth * 1.02, gaugeHeight + 0.22);
+      overlayGeometry.translate(0, gaugeHeight / 2 + 0.11, 0);
+      const overlayMaterial = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.08,
+        side: THREE.DoubleSide,
+      });
+      const overlay = new THREE.Mesh(overlayGeometry, overlayMaterial);
+      overlay.position.z = 0.02;
+      gaugeGroup.add(overlay);
+
+      const tickMaterial = new THREE.MeshBasicMaterial({
+        color: palette.storageLabels || 0xeaf2ff,
+        transparent: true,
+        opacity: 0.42,
+        side: THREE.DoubleSide,
+      });
+      const tickGroup = new THREE.Group();
+      const tickMaterials = [];
+      for (let i = 0; i <= 5; i += 1) {
+        const tickGeometry = new THREE.PlaneGeometry(gaugeWidth * 1.08, 0.08);
+        const tick = new THREE.Mesh(tickGeometry, tickMaterial.clone());
+        tick.position.set(0, (gaugeHeight / 5) * i + 0.04, 0.018);
+        tickGroup.add(tick);
+        tickMaterials.push(tick.material);
+      }
+      gaugeGroup.add(tickGroup);
 
       const label = createLabelSprite(entry.key.toUpperCase(), palette.storageLabels);
       label.position.set(0, height + 5, 0);
@@ -725,7 +944,12 @@ export class TileRenderer {
         group,
         shell,
         lid,
-        indicator: gauge,
+        indicator: fill,
+        gaugeFrame: frame,
+        gaugeOverlay: overlay,
+        gaugeTicks: tickGroup,
+        gaugeTickMaterials: tickMaterials,
+        gaugeHeight,
         label,
         baseRadius: radius,
         baseHeight: height,
@@ -741,32 +965,47 @@ export class TileRenderer {
     const dockTileX = lastPoint?.x ?? this.mapBounds.maxX + 1.6;
     const dockTileY = lastPoint?.y ?? this.mapBounds.minY + this.mapSpan.height * 0.72;
 
-    const waterLength = this.tileScale * 14;
-    const waterWidth = this.tileScale * 6.2;
+    const laneOffset = 2.8;
+    const waterLength = this.tileScale * 15.5;
+    const waterWidth = this.tileScale * 7.2;
     const waterGeometry = new THREE.PlaneGeometry(waterLength, waterWidth, 1, 1);
     const waterMaterial = new THREE.MeshStandardMaterial({
       color: 0x162b3d,
       transparent: true,
-      opacity: 0.74,
-      metalness: 0.08,
-      roughness: 0.62,
+      opacity: 0.78,
+      metalness: 0.16,
+      roughness: 0.52,
     });
     const water = new THREE.Mesh(waterGeometry, waterMaterial);
     water.rotation.x = -Math.PI / 2;
-    const waterWorld = this._tileToWorld(dockTileX + 6.5, dockTileY - 0.55, 0);
+    const waterWorld = this._tileToWorld(dockTileX + 7.6, dockTileY + laneOffset, 0);
     water.position.copy(waterWorld);
-    water.position.y = 0.02;
+    water.position.y = 0.018;
     this.scene.add(water);
     this.waterMesh = water;
 
-    const dockGeometry = new THREE.BoxGeometry(this.tileScale * 4.6, 0.6, this.tileScale * 1.8);
+    const quayGeometry = new THREE.PlaneGeometry(this.tileScale * 5.2, this.tileScale * 2.8);
+    const quayMaterial = new THREE.MeshStandardMaterial({
+      color: 0x525b66,
+      metalness: 0.18,
+      roughness: 0.74,
+    });
+    const quay = new THREE.Mesh(quayGeometry, quayMaterial);
+    quay.rotation.x = -Math.PI / 2;
+    const quayWorld = this._tileToWorld(dockTileX + 1.8, dockTileY + laneOffset + 0.68, 0);
+    quay.position.copy(quayWorld);
+    quay.position.y = 0.031;
+    this.scene.add(quay);
+    this.quayMesh = quay;
+
+    const dockGeometry = new THREE.BoxGeometry(this.tileScale * 4.8, 0.6, this.tileScale * 2.1);
     const dockMaterial = new THREE.MeshStandardMaterial({
       color: 0x6c7682,
       metalness: 0.12,
       roughness: 0.74,
     });
     const dock = new THREE.Mesh(dockGeometry, dockMaterial);
-    const dockWorld = this._tileToWorld(dockTileX + 1.2, dockTileY - 0.45, 0);
+    const dockWorld = this._tileToWorld(dockTileX + 1.6, dockTileY + laneOffset - 0.15, 0);
     dock.position.copy(dockWorld);
     dock.position.y = 0.32;
     this.scene.add(dock);
@@ -774,21 +1013,21 @@ export class TileRenderer {
 
     const bollardGeometry = new THREE.CylinderGeometry(0.25, 0.32, 1.2, 10);
     const bollardMaterial = new THREE.MeshStandardMaterial({ color: 0xf1f3f6, metalness: 0.32, roughness: 0.38 });
-    const bollardOffsets = [-1.1, 0, 1.1];
+    const bollardOffsets = [-1.2, -0.2, 0.8];
     bollardOffsets.forEach((offset) => {
       const bollard = new THREE.Mesh(bollardGeometry, bollardMaterial);
-      bollard.position.set(dockWorld.x + offset * this.tileScale * 0.35, 0.9, dockWorld.z + this.tileScale * 0.72);
+      bollard.position.set(dockWorld.x + offset * this.tileScale * 0.38, 0.9, dockWorld.z + this.tileScale * 0.88);
       this.scene.add(bollard);
     });
 
     const dockLight = new THREE.PointLight(0x9ac9ff, 0.5, 42, 2.2);
-    dockLight.position.set(dockWorld.x - this.tileScale * 0.6, 4.2, dockWorld.z + this.tileScale * 0.2);
+    dockLight.position.set(dockWorld.x - this.tileScale * 0.4, 4.2, dockWorld.z + this.tileScale * 0.4);
     this.scene.add(dockLight);
     this.dockLight = dockLight;
 
-    const approach = this._tileToWorld(dockTileX + 8.4, dockTileY - 0.5, 0.16);
-    const dockPosition = this._tileToWorld(dockTileX + 1.5, dockTileY - 0.5, 0.16);
-    const depart = this._tileToWorld(dockTileX + 13.8, dockTileY - 0.7, 0.16);
+    const approach = this._tileToWorld(dockTileX + 10.4, dockTileY + laneOffset - 0.4, 0.12);
+    const dockPosition = this._tileToWorld(dockTileX + 2.2, dockTileY + laneOffset - 0.1, 0.12);
+    const depart = this._tileToWorld(dockTileX + 13.6, dockTileY + laneOffset + 0.2, 0.12);
 
     const dockDirection = dockPosition.clone().sub(approach).setY(0).normalize();
     const departDirection = depart.clone().sub(dockPosition).setY(0).normalize();
@@ -805,7 +1044,7 @@ export class TileRenderer {
       depart,
       dockDirection,
       departDirection,
-      surfaceY: dockPosition.y + 0.02,
+      surfaceY: water.position.y + 0.02,
     };
 
     this.shipLayer = new THREE.Group();
@@ -852,33 +1091,62 @@ export class TileRenderer {
     const baseColorHex = SHIP_COLORS[shipment.product] || DEFAULT_SHIP_COLOR;
     const baseColor = new THREE.Color(baseColorHex);
 
-    const hullLength = this.tileScale * 1.6;
-    const hullWidth = this.tileScale * 0.5;
-    const hullHeight = 0.72;
+    const hullLength = this.tileScale * 1.85;
+    const hullWidth = this.tileScale * 0.56;
+    const hullHeight = 0.74;
 
-    const hullGeometry = new THREE.BoxGeometry(hullLength, hullHeight, hullWidth);
+    const hullShape = new THREE.Shape();
+    const halfLength = hullLength / 2;
+    const halfWidth = hullWidth / 2;
+    hullShape.moveTo(-halfLength * 0.95, -halfWidth * 0.7);
+    hullShape.lineTo(halfLength * 0.42, -halfWidth);
+    hullShape.quadraticCurveTo(halfLength * 0.62, 0, halfLength * 0.42, halfWidth);
+    hullShape.lineTo(-halfLength * 0.95, halfWidth * 0.7);
+    hullShape.quadraticCurveTo(-halfLength * 1.12, 0, -halfLength * 0.95, -halfWidth * 0.7);
+
+    const hullGeometry = new THREE.ExtrudeGeometry(hullShape, {
+      depth: hullHeight,
+      bevelEnabled: false,
+      curveSegments: 24,
+      steps: 1,
+    });
+    hullGeometry.rotateX(-Math.PI / 2);
+    hullGeometry.translate(0, hullHeight / 2, 0);
+    hullGeometry.computeVertexNormals();
+
     const hullMaterial = new THREE.MeshStandardMaterial({
-      color: baseColor.clone().multiplyScalar(0.85),
-      metalness: 0.2,
-      roughness: 0.45,
+      color: baseColor.clone().multiplyScalar(0.82),
+      metalness: 0.22,
+      roughness: 0.4,
     });
     const hull = new THREE.Mesh(hullGeometry, hullMaterial);
-    hull.position.y = hullHeight / 2;
     group.add(hull);
 
-    const deckHeight = hullHeight * 0.35;
-    const deckGeometry = new THREE.BoxGeometry(hullLength * 0.88, deckHeight, hullWidth * 0.92);
+    const waterlineGeometry = new THREE.BoxGeometry(hullLength * 0.96, hullHeight * 0.22, hullWidth * 0.88);
+    const waterlineMaterial = new THREE.MeshStandardMaterial({
+      color: baseColor.clone().multiplyScalar(0.35),
+      metalness: 0.3,
+      roughness: 0.48,
+      transparent: true,
+      opacity: 0.95,
+    });
+    const waterline = new THREE.Mesh(waterlineGeometry, waterlineMaterial);
+    waterline.position.y = hullHeight * 0.22;
+    group.add(waterline);
+
+    const deckGeometry = new THREE.PlaneGeometry(hullLength * 0.9, hullWidth * 0.6, 1, 1);
     const deckMaterial = new THREE.MeshStandardMaterial({
-      color: baseColor.clone().lerp(new THREE.Color(0xf7f9fc), 0.45),
-      metalness: 0.08,
-      roughness: 0.38,
+      color: baseColor.clone().lerp(new THREE.Color(0xf7f9fc), 0.48),
+      metalness: 0.1,
+      roughness: 0.35,
     });
     const deck = new THREE.Mesh(deckGeometry, deckMaterial);
-    deck.position.y = hullHeight + deckHeight / 2 - 0.02;
+    deck.rotation.x = -Math.PI / 2;
+    deck.position.y = hullHeight * 0.9;
     group.add(deck);
 
-    const bridgeHeight = hullHeight * 0.55;
-    const bridgeGeometry = new THREE.BoxGeometry(hullLength * 0.32, bridgeHeight, hullWidth * 0.6);
+    const bridgeHeight = hullHeight * 0.58;
+    const bridgeGeometry = new THREE.BoxGeometry(hullLength * 0.32, bridgeHeight, hullWidth * 0.58);
     const bridgeMaterial = new THREE.MeshStandardMaterial({
       color: 0xf0f4f8,
       metalness: 0.05,
@@ -888,21 +1156,79 @@ export class TileRenderer {
     bridge.position.set(-hullLength * 0.18, hullHeight + bridgeHeight / 2, 0);
     group.add(bridge);
 
-    const mastGeometry = new THREE.CylinderGeometry(0.14, 0.18, hullHeight * 0.9, 12);
-    const mastMaterial = new THREE.MeshStandardMaterial({ color: 0xfdfdfd, metalness: 0.12, roughness: 0.3 });
+    const stackGeometry = new THREE.CylinderGeometry(hullWidth * 0.12, hullWidth * 0.18, hullHeight * 0.64, 14);
+    const stackMaterial = new THREE.MeshStandardMaterial({
+      color: baseColor.clone().lerp(new THREE.Color(0x2d3442), 0.55),
+      metalness: 0.3,
+      roughness: 0.44,
+    });
+    const stack = new THREE.Mesh(stackGeometry, stackMaterial);
+    stack.position.set(-hullLength * 0.05, hullHeight + hullHeight * 0.55, 0);
+    group.add(stack);
+
+    const mastGeometry = new THREE.CylinderGeometry(0.12, 0.14, hullHeight * 1.1, 12);
+    const mastMaterial = new THREE.MeshStandardMaterial({ color: 0xfdfdfd, metalness: 0.18, roughness: 0.28 });
     const mast = new THREE.Mesh(mastGeometry, mastMaterial);
-    mast.position.set(hullLength * 0.25, hullHeight + deckHeight + hullHeight * 0.25, 0);
+    mast.position.set(hullLength * 0.3, hullHeight + hullHeight * 0.75, 0);
     group.add(mast);
 
-    const navLight = new THREE.PointLight(baseColor.clone().lerp(new THREE.Color(0xffffff), 0.35), 0.45, 38, 2.2);
-    navLight.position.set(hullLength * 0.32, hullHeight + bridgeHeight + 0.4, 0);
+    const radarGeometry = new THREE.BoxGeometry(hullLength * 0.22, hullHeight * 0.08, hullWidth * 0.12);
+    const radarMaterial = new THREE.MeshStandardMaterial({ color: 0xf5faff, metalness: 0.12, roughness: 0.28 });
+    const radar = new THREE.Mesh(radarGeometry, radarMaterial);
+    radar.position.set(hullLength * 0.3, mast.position.y + hullHeight * 0.3, 0);
+    group.add(radar);
+
+    const railMaterial = new THREE.MeshStandardMaterial({
+      color: baseColor.clone().lerp(new THREE.Color(0xffffff), 0.7),
+      metalness: 0.4,
+      roughness: 0.25,
+    });
+    const railGeometry = new THREE.BoxGeometry(hullLength * 0.86, 0.06, 0.04);
+    const portRail = new THREE.Mesh(railGeometry, railMaterial);
+    portRail.position.set(0, hullHeight + 0.14, hullWidth * 0.34);
+    group.add(portRail);
+    const starboardRail = portRail.clone();
+    starboardRail.position.z = -hullWidth * 0.34;
+    group.add(starboardRail);
+
+    const cargoGroup = new THREE.Group();
+    const cargoMaterial = new THREE.MeshStandardMaterial({
+      color: baseColor.clone().lerp(new THREE.Color(0xffffff), 0.2),
+      metalness: 0.16,
+      roughness: 0.52,
+    });
+    const segments = 3;
+    for (let i = 0; i < segments; i += 1) {
+      const box = new THREE.Mesh(new THREE.BoxGeometry(hullLength * 0.2, hullHeight * 0.22, hullWidth * 0.48), cargoMaterial);
+      const offset = (i - (segments - 1) / 2) * hullLength * 0.26;
+      box.position.set(offset, hullHeight + hullHeight * 0.36, 0);
+      cargoGroup.add(box);
+    }
+    group.add(cargoGroup);
+
+    const navLight = new THREE.PointLight(baseColor.clone().lerp(new THREE.Color(0xffffff), 0.35), 0.48, 42, 2.4);
+    navLight.position.set(hullLength * 0.34, hullHeight + bridgeHeight + 0.46, 0);
     group.add(navLight);
 
     const labelText = (shipment.product || "cargo").toUpperCase();
     const label = createLabelSprite(labelText);
     label.scale.set(12, 3, 1);
-    label.position.set(0, hullHeight + bridgeHeight + 1.2, 0);
+    label.position.set(0, hullHeight + bridgeHeight + 1.4, 0);
     group.add(label);
+
+    const wakeGeometry = new THREE.PlaneGeometry(hullWidth * 1.1, hullLength * 0.9);
+    const wakeMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.12,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const wake = new THREE.Mesh(wakeGeometry, wakeMaterial);
+    wake.rotation.x = -Math.PI / 2;
+    wake.rotation.z = Math.PI / 2;
+    wake.position.set(-hullLength * 0.55, waterline.position.y - hullHeight * 0.18, 0);
+    group.add(wake);
 
     const initialPosition = this.shipLane?.approach.clone() || new THREE.Vector3();
     group.position.copy(initialPosition);
@@ -926,6 +1252,9 @@ export class TileRenderer {
       deck,
       bridge,
       mast,
+      rails: [portRail, starboardRail],
+      cargo: cargoGroup,
+      wake,
       light: navLight,
       label,
       baseColor,
@@ -974,6 +1303,12 @@ export class TileRenderer {
     ship.light.intensity = status === "missed" ? 0.3 : status === "pending" ? 0.5 : 0.38;
 
     this._positionShip(ship, ship.progress, bob);
+    if (ship.wake?.material) {
+      const underway = ship.progress < 0.95 && ship.targetProgress > ship.progress + 0.02;
+      const departing = ship.progress > 1.02;
+      const wakeOpacity = underway || departing ? 0.22 : 0.08;
+      ship.wake.material.opacity = wakeOpacity;
+    }
     ship.retireTimer = 0;
   }
 
@@ -1015,6 +1350,9 @@ export class TileRenderer {
     ship.hull.material.color.lerp(ship.baseColor.clone().multiplyScalar(0.9), clamp(deltaSeconds * 1.5, 0, 1));
     ship.light.intensity = Math.max(0.2, ship.light.intensity - deltaSeconds * 0.1);
     this._positionShip(ship, ship.progress, bob);
+    if (ship.wake?.material) {
+      ship.wake.material.opacity = Math.max(0.04, ship.wake.material.opacity - deltaSeconds * 0.06);
+    }
     if (ship.retireTimer > 5.5) {
       this._removeShip(ship.id);
     }
@@ -1095,12 +1433,58 @@ export class TileRenderer {
       const waterBase = new THREE.Color(palette.flowLow || 0x1a5d8f);
       this.waterMesh.material.color.copy(waterBase.lerp(new THREE.Color(0x162b3d), 0.45));
     }
+    if (this.dockApron?.color) {
+      this.dockApron.color.copy(new THREE.Color(palette.ground || 0x1b2736).lerp(new THREE.Color(0x1f2c3b), 0.28));
+    }
     if (this.dockMesh?.material) {
       const dockBase = new THREE.Color(palette.storageShell || 0x6c7682);
       this.dockMesh.material.color.copy(dockBase.lerp(new THREE.Color(0x88929f), 0.4));
     }
     if (this.dockLight) {
       this.dockLight.color = new THREE.Color(palette.flowHigh || 0xaad0ff);
+    }
+    if (this.quayMesh?.material) {
+      const quayColor = new THREE.Color(palette.storageShell || 0x6c7682).lerp(new THREE.Color(0x4e5965), 0.35);
+      this.quayMesh.material.color.copy(quayColor);
+    }
+    for (const tank of this.storageMeshes.values()) {
+      if (tank.gaugeFrame?.material) {
+        const frameColor = palette.storageShell ? new THREE.Color(palette.storageShell).lerp(new THREE.Color(0x0c121b), 0.65) : new THREE.Color(0x0c121b);
+        tank.gaugeFrame.material.color.copy(frameColor);
+      }
+      if (Array.isArray(tank.gaugeTickMaterials)) {
+        tank.gaugeTickMaterials.forEach((material) => {
+          if (!material?.color) {
+            return;
+          }
+          material.color.copy(new THREE.Color(palette.storageLabels || 0xeaf2ff));
+        });
+      }
+    }
+    if (Array.isArray(this.groundDetailMaterials)) {
+      this.groundDetailMaterials.forEach((material) => {
+        if (!material || !material.color) {
+          return;
+        }
+        const role = material.userData?.role;
+        switch (role) {
+          case "apron":
+            material.color.copy(new THREE.Color(palette.ground || 0x1b2736).lerp(new THREE.Color(0x1f2c3b), 0.28));
+            break;
+          case "lattice":
+            material.color.copy(new THREE.Color(palette.gridMinor || 0x233244).lerp(new THREE.Color(0x415064), 0.35));
+            material.opacity = 0.24;
+            break;
+          case "spine":
+            material.color.copy(new THREE.Color(0x28384c).lerp(new THREE.Color(palette.gridMajor || 0x2e3f55), 0.25));
+            break;
+          case "corridor":
+            material.color.copy(new THREE.Color(0x32455c).lerp(new THREE.Color(palette.gridMajor || 0x2e3f55), 0.15));
+            break;
+          default:
+            break;
+        }
+      });
     }
     if (!initial) {
       for (const pipeline of this.pipelineMeshes.values()) {
