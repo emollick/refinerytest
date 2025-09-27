@@ -917,9 +917,9 @@ export class RefinerySimulation {
     const envExcess = Math.max(0, carbonIntensity - environmentTarget);
     let environmentPenalty = 0;
     if (envExcess > 0) {
-      environmentPenalty = envExcess * productionPerDay * 18;
+      environmentPenalty = envExcess * productionPerDay * 10;
       if (envExcess > 0.05) {
-        environmentPenalty *= 1.2;
+        environmentPenalty *= 1.15;
       }
     }
 
@@ -2137,18 +2137,18 @@ export class RefinerySimulation {
       );
 
       const costTarget = Math.max(
-        feedCostPerBbl * 0.78,
+        feedCostPerBbl * 0.72,
         feedCostPerBbl +
           operationsPerBbl +
           carryingPerBbl +
-          penaltyPerBbl * (0.4 + share * 0.5) +
-          logisticDrag * (0.24 + weights.shipping * 0.16) +
-          shippingPressure * weights.shipping * 14 +
-          downtimePressure * weights.downtime * 18 +
-          directiveDrag * 8 +
-          environmentPremium * weights.env * 14 +
-          safetyPremium * weights.maintenance * 6 -
-          maintenanceRelief * weights.maintenance * 17
+          penaltyPerBbl * (0.32 + share * 0.42) +
+          logisticDrag * (0.18 + weights.shipping * 0.12) +
+          shippingPressure * weights.shipping * 11 +
+          downtimePressure * weights.downtime * 14 +
+          directiveDrag * 6 +
+          environmentPremium * weights.env * 10 +
+          safetyPremium * weights.maintenance * 5 -
+          maintenanceRelief * weights.maintenance * 15
       );
 
       const prevCost = Number.isFinite(state.productionCost[product])
@@ -2159,13 +2159,13 @@ export class RefinerySimulation {
 
       const spotPrice = Math.max(spot[product] || state.futures[product] || newCost, 0);
       const futuresTarget = Math.max(
-        spotPrice * 0.6,
+        spotPrice * 0.62,
         spotPrice *
-          (1 + demandGap * 0.62 + storagePressure * 0.35 + shippingPressure * weights.shipping * 0.28 + downtimePressure * weights.downtime * 0.2 - maintenanceRelief * weights.maintenance * 0.22 + mixBias * 0.16) +
-          (penaltyPerBbl + carryingPerBbl) * 0.55 +
-          logisticDrag * 2.1 +
-          state.drift[product] * 8.2 +
-          environmentPremium * weights.env * 4.5
+          (1 + demandGap * 0.68 + storagePressure * 0.32 + shippingPressure * weights.shipping * 0.24 + downtimePressure * weights.downtime * 0.18 - maintenanceRelief * weights.maintenance * 0.2 + mixBias * 0.18) +
+          (penaltyPerBbl + carryingPerBbl) * 0.48 +
+          logisticDrag * 1.6 +
+          state.drift[product] * 6.5 +
+          environmentPremium * weights.env * 4.2
       );
 
       const prevFuture = Number.isFinite(state.futures[product])
@@ -2218,13 +2218,13 @@ export class RefinerySimulation {
     const demandShortage = logistics?.demandShortage || 0;
     const scenarioRisk = scenario?.riskMultiplier || 1;
 
-    const basePressure = 0.08 + (scenario?.environmentPressure || 0) * 0.18;
-    const storagePressure = storageUtil > 0.78 ? (storageUtil - 0.78) * 1.05 : 0;
-    const reliabilityPressure = Math.max(0, 1 - reliability) * (0.5 + scenarioRisk * 0.1);
-    const shipmentPressure = Math.max(0, 1 - shipmentReliability) * 0.7;
-    const directivePressure = Math.max(0, 1 - directiveReliability) * 0.45;
-    const shortagePressure = demandShortage > 0 ? Math.min(0.32, demandShortage / 280) : 0;
-    const incidentPressure = Math.min(0.36, incidentCount * 0.06 + incidentPenalty / 900);
+    const basePressure = 0.05 + (scenario?.environmentPressure || 0) * 0.14;
+    const storagePressure = storageUtil > 0.8 ? (storageUtil - 0.8) * 0.85 : 0;
+    const reliabilityPressure = Math.max(0, 1 - reliability) * (0.4 + scenarioRisk * 0.08);
+    const shipmentPressure = Math.max(0, 1 - shipmentReliability) * 0.55;
+    const directivePressure = Math.max(0, 1 - directiveReliability) * 0.32;
+    const shortagePressure = demandShortage > 0 ? Math.min(0.26, demandShortage / 360) : 0;
+    const incidentPressure = Math.min(0.28, incidentCount * 0.05 + incidentPenalty / 1150);
 
     const targetStress = clamp(
       basePressure +
@@ -2234,13 +2234,13 @@ export class RefinerySimulation {
         directivePressure +
         shortagePressure +
         incidentPressure,
-      0.08,
-      0.85
+      0.04,
+      0.65
     );
 
     this.marketStress += (targetStress - this.marketStress) * 0.16;
 
-    const multiplier = clamp(1 - this.marketStress, 0.35, 1);
+    const multiplier = clamp(1 - this.marketStress * 0.7, 0.55, 1.05);
     const carryingCost =
       storageUtil > 0.55
         ? Math.pow(storageUtil, 1.35) * 340 + Math.max(0, storageUtil - 0.85) * 640
