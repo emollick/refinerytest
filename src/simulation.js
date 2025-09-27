@@ -137,6 +137,8 @@ export class RefinerySimulation {
       "Simulation initialized. Adjust the sliders to explore the refinery."
     );
 
+    this._environmentPenaltyCooldown = 0;
+
     this._ensureScheduledShipments(this.shipmentHorizonHours);
     this._updateNextShipmentCountdown();
 
@@ -535,6 +537,7 @@ export class RefinerySimulation {
     this.performanceHistory = [];
     this.market = this._initMarketState();
     this.logs = [];
+    this._environmentPenaltyCooldown = 0;
     this._ensureScheduledShipments(this.shipmentHorizonHours);
     this._updateNextShipmentCountdown();
     this.recorder = this._createRecorderState();
@@ -828,6 +831,19 @@ export class RefinerySimulation {
     result.waste += residPool + heavyPool;
     result.lpg += Math.max(0, lpgPool);
 
+    const totalLiquidProducts = result.gasoline + result.diesel + result.jet;
+    const maxLiquidProducts = crudeThroughput * 0.92;
+    if (totalLiquidProducts > maxLiquidProducts && totalLiquidProducts > 0) {
+      const scale = maxLiquidProducts / totalLiquidProducts;
+      result.gasoline *= scale;
+      result.diesel *= scale;
+      result.jet *= scale;
+    }
+    const maxLpg = crudeThroughput * 0.08;
+    if (result.lpg > maxLpg) {
+      result.lpg = maxLpg;
+    }
+
     if (strainState.penalty > 0.0001) {
       const penalty = clamp(strainState.penalty, 0, 0.4);
       const diverted = crudeThroughput * penalty * 0.26;
@@ -886,7 +902,39 @@ export class RefinerySimulation {
       scenario,
     });
 
-    const penalty = incidentsRisk.incidentPenalty + logisticsReport.penalty;
+    const environmentLevel = clamp(this.params.environment ?? 0.35, 0, 1);
+    const carbonBase =
+      result.waste * 3.5 +
+      result.diesel * 0.6 +
+      result.gasoline * 0.5 +
+      incidentsRisk.incidents * 2.8;
+    const envMitigation = 1 - clamp(environmentLevel * 0.55, 0, 0.6);
+    const carbonPerHour = carbonBase * envMitigation;
+    const carbonPerDay = perHourToPerDay(carbonPerHour);
+    const productionPerDay = perHourToPerDay(result.gasoline + result.diesel + result.jet);
+    const environmentTarget = clamp(0.34 - environmentLevel * 0.22 + (scenario.environmentPressure || 0) * 0.05, 0.12, 0.5);
+    const carbonIntensity = productionPerDay > 0 ? carbonPerDay / productionPerDay : carbonPerDay;
+    const envExcess = Math.max(0, carbonIntensity - environmentTarget);
+    let environmentPenalty = 0;
+    if (envExcess > 0) {
+      environmentPenalty = envExcess * productionPerDay * 18;
+      if (envExcess > 0.05) {
+        environmentPenalty *= 1.2;
+      }
+    }
+
+    if (this._environmentPenaltyCooldown > 0) {
+      this._environmentPenaltyCooldown = Math.max(0, this._environmentPenaltyCooldown - hours);
+    }
+    if (environmentPenalty > 4 && this._environmentPenaltyCooldown <= 0) {
+      this.pushLog(
+        envExcess > 0.08 ? "warning" : "info",
+        `Environmental compliance drag: $${environmentPenalty.toFixed(1)}k this hour (intensity ${(carbonIntensity * 100).toFixed(1)}%).`
+      );
+      this._environmentPenaltyCooldown = 1.6;
+    }
+
+    let penalty = incidentsRisk.incidentPenalty + logisticsReport.penalty + environmentPenalty;
     const fixedOverhead = this._calculateFixedOverhead({
       crudeThroughput: crudeThroughputPerDay,
       scenario,
@@ -947,13 +995,7 @@ export class RefinerySimulation {
     this.metrics.reliability = incidentsRisk.reliability;
     this.metrics.operationalStrain = this._round(strainState.strain);
 
-    const carbonBase =
-      result.waste * 3.5 +
-      result.diesel * 0.6 +
-      result.gasoline * 0.5 +
-      incidentsRisk.incidents * 2.8;
-    const envMitigation = 1 - clamp(this.params.environment * 0.55, 0, 0.6);
-    this.metrics.carbon = carbonBase * envMitigation;
+    this.metrics.carbon = carbonPerHour;
 
     this.flows.toReformer = reformFeed;
     this.flows.toCracker = fccFeed;
@@ -1833,6 +1875,11 @@ export class RefinerySimulation {
       failed: 0,
       penalty: 0,
       demandShortage: 0,
+      inventory: {
+        levels: { ...this.storage.levels },
+        capacity: { ...this.storage.capacity },
+      },
+      storageUtil: this.metrics.storageUtilization,
     };
 
     if (demandShortages.length) {
@@ -2047,6 +2094,12 @@ export class RefinerySimulation {
     const safetyPremium = clamp(0.48 - safetyLevel, -0.25, 0.45);
     const environmentPremium = clamp(environmentLevel - 0.35, -0.25, 0.5);
 
+    const focus = clamp(this.params.productFocus ?? 0.5, 0, 1);
+    const focusShift = focus - 0.5;
+
+    const inventoryLevels = logistics?.inventory?.levels || {};
+    const inventoryCapacity = logistics?.inventory?.capacity || {};
+
     const demandDaily = this._calculateMarketDemand(HOURS_PER_DAY, scenario || this.activeScenario);
     const smoothingFutures = 0.25;
     const smoothingCost = 0.35;
@@ -2062,12 +2115,23 @@ export class RefinerySimulation {
       const output = Math.max(prod[product] || 0, 0);
       const share = totalOutput > 0 ? output / totalOutput : 0;
       const demand = Math.max(demandDaily[product] || 0, 0.0001);
-      const demandGap = clamp(demand > 0 ? (demand - output) / demand : 0, -0.45, 0.6);
+      const supplyPerDay = perHourToPerDay(output);
+      const demandGap = clamp(demand > 0 ? (demand - supplyPerDay) / demand : 0, -0.55, 0.65);
+      const inventoryLevel = inventoryLevels[product] ?? demand * 0.4;
+      const inventoryCap = Math.max(inventoryCapacity[product] ?? demand * 1.6, demand * 0.6);
+      const inventoryRatio = clamp(inventoryLevel / inventoryCap, 0, 1.4);
+      const storagePressure = clamp(inventoryRatio - 0.55, -0.45, 0.65);
       const logisticPenalty = logistics?.penalty || 0;
       const logisticDrag = totalBarrels > 0 ? logisticPenalty / totalBarrels : 0;
+      const mixBias =
+        product === "gasoline"
+          ? focusShift * 0.35
+          : product === "diesel"
+          ? -focusShift * 0.28
+          : -Math.abs(focusShift) * 0.18;
 
       state.drift[product] = clamp(
-        (state.drift[product] || 0) * 0.82 + demandGap * 0.25 - shippingPressure * 0.18,
+        (state.drift[product] || 0) * 0.78 + demandGap * 0.28 - shippingPressure * 0.16 - storagePressure * 0.18 + mixBias * 0.22,
         -0.6,
         0.6
       );
@@ -2078,13 +2142,13 @@ export class RefinerySimulation {
           operationsPerBbl +
           carryingPerBbl +
           penaltyPerBbl * (0.4 + share * 0.5) +
-          logisticDrag * (0.3 + weights.shipping * 0.2) +
-          shippingPressure * weights.shipping * 18 +
-          downtimePressure * weights.downtime * 22 +
+          logisticDrag * (0.24 + weights.shipping * 0.16) +
+          shippingPressure * weights.shipping * 14 +
+          downtimePressure * weights.downtime * 18 +
           directiveDrag * 8 +
-          environmentPremium * weights.env * 12 +
-          safetyPremium * weights.maintenance * 7 -
-          maintenanceRelief * weights.maintenance * 18
+          environmentPremium * weights.env * 14 +
+          safetyPremium * weights.maintenance * 6 -
+          maintenanceRelief * weights.maintenance * 17
       );
 
       const prevCost = Number.isFinite(state.productionCost[product])
@@ -2095,13 +2159,13 @@ export class RefinerySimulation {
 
       const spotPrice = Math.max(spot[product] || state.futures[product] || newCost, 0);
       const futuresTarget = Math.max(
-        spotPrice * 0.58,
+        spotPrice * 0.6,
         spotPrice *
-          (1 + demandGap * 0.58 + shippingPressure * weights.shipping * 0.3 + downtimePressure * weights.downtime * 0.24 - maintenanceRelief * weights.maintenance * 0.18) +
+          (1 + demandGap * 0.62 + storagePressure * 0.35 + shippingPressure * weights.shipping * 0.28 + downtimePressure * weights.downtime * 0.2 - maintenanceRelief * weights.maintenance * 0.22 + mixBias * 0.16) +
           (penaltyPerBbl + carryingPerBbl) * 0.55 +
-          logisticDrag * 2.5 +
-          state.drift[product] * 9 +
-          environmentPremium * weights.env * 4
+          logisticDrag * 2.1 +
+          state.drift[product] * 8.2 +
+          environmentPremium * weights.env * 4.5
       );
 
       const prevFuture = Number.isFinite(state.futures[product])
@@ -2130,13 +2194,13 @@ export class RefinerySimulation {
 
   _calculateFixedOverhead({ crudeThroughput, scenario }) {
     const maintenancePenalty = scenario?.maintenancePenalty || 0;
-    const base = 620 + maintenancePenalty * 320;
+    const base = 480 + maintenancePenalty * 260;
     const throughputDaily = Math.max(crudeThroughput || 0, 0);
-    const throughputLoad = throughputDaily * (4.8 + maintenancePenalty * 2.6);
-    const maintenanceFactor = 0.6 + (this.params.maintenance || 0) * 0.9;
-    const safetyFactor = 0.45 + (this.params.safety || 0) * 0.7;
+    const throughputLoad = throughputDaily * (3.2 + maintenancePenalty * 1.8);
+    const maintenanceFactor = 0.55 + (this.params.maintenance || 0) * 0.8;
+    const safetyFactor = 0.4 + (this.params.safety || 0) * 0.6;
     const overheadPerDay =
-      (base + throughputLoad) * (0.55 + maintenanceFactor * 0.35 + safetyFactor * 0.25);
+      (base + throughputLoad) * (0.48 + maintenanceFactor * 0.32 + safetyFactor * 0.18);
     return overheadPerDay / HOURS_PER_DAY;
   }
 
@@ -3124,6 +3188,10 @@ export class RefinerySimulation {
       extraShipmentCooldown: this.extraShipmentCooldown || 0,
       upgrades: { ...this.storageUpgrades },
       alerts: this.getStorageAlerts(),
+      inventory: {
+        levels: { ...this.storage.levels },
+        capacity: { ...this.storage.capacity },
+      },
     };
   }
 
