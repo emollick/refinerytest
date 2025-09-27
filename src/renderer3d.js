@@ -84,6 +84,8 @@ export class TileRenderer {
     this.quayMesh = null;
     this.groundDetailLayer = null;
     this.groundDetailMaterials = [];
+    this._vectorA = new THREE.Vector3();
+    this._vectorB = new THREE.Vector3();
 
     this.deviceScaleX = 1;
     this.deviceScaleY = 1;
@@ -195,6 +197,13 @@ export class TileRenderer {
       if (unit.cap) {
         unit.cap.material.color.copy(accentColor);
       }
+      if (Array.isArray(unit.accentMeshes)) {
+        unit.accentMeshes.forEach((mesh) => {
+          if (mesh?.material?.color) {
+            mesh.material.color.copy(accentColor);
+          }
+        });
+      }
 
       const indicatorIntensity = 0.15 + heat * 0.75;
       unit.indicator.scale.y = 0.2 + heat * 0.9;
@@ -224,6 +233,17 @@ export class TileRenderer {
       const level = Number.isFinite(levelRaw) ? levelRaw : 0;
       const capacity = Number.isFinite(capacityRaw) && capacityRaw > 0 ? capacityRaw : 1;
       const ratio = clamp(level / capacity, 0, 1);
+
+      if (tank.gaugeGroup) {
+        const toCamera = this._vectorA.copy(this.camera.position).sub(tank.group.position);
+        toCamera.y = 0;
+        if (toCamera.lengthSq() > 0.0001) {
+          toCamera.normalize();
+          const offset = this._vectorB.copy(toCamera).multiplyScalar((tank.baseRadius || 3.2) + 1.4);
+          tank.gaugeGroup.position.set(offset.x, tank.gaugeMountY ?? 0.12, offset.z);
+          tank.gaugeGroup.rotation.set(0, Math.atan2(toCamera.x, toCamera.z), 0);
+        }
+      }
 
       if (tank.indicator) {
         const indicatorScale = clamp(ratio, 0.02, 1);
@@ -541,25 +561,203 @@ export class TileRenderer {
       pad.position.y = 0.02;
       group.add(pad);
 
-      const bodyGeometry = new THREE.BoxGeometry(baseWidth, baseHeight, baseDepth);
       const bodyMaterial = new THREE.MeshStandardMaterial({
         color: def.color,
         metalness: 0.28,
         roughness: 0.62,
       });
-      const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-      body.position.y = baseHeight / 2;
-      group.add(body);
-
-      const capGeometry = new THREE.BoxGeometry(baseWidth * 0.78, baseHeight * 0.32, baseDepth * 0.78);
-      const capMaterial = new THREE.MeshStandardMaterial({
+      const accentMaterial = new THREE.MeshStandardMaterial({
         color: def.accent,
         metalness: 0.25,
         roughness: 0.46,
       });
-      const cap = new THREE.Mesh(capGeometry, capMaterial);
-      cap.position.y = baseHeight + capGeometry.parameters.height / 2 - 0.4;
-      group.add(cap);
+      const accentMeshes = [];
+      let body;
+      let cap = null;
+      let indicatorAnchor = baseHeight * 0.62;
+
+      switch (def.style) {
+        case "towers": {
+          const towerRadius = Math.min(baseWidth, baseDepth) * 0.18;
+          const towerSpacing = Math.min(baseWidth, baseDepth) * 0.42;
+          const heights = [baseHeight * 1.18, baseHeight * 0.94, baseHeight * 0.78];
+          const offsets = [-towerSpacing, 0, towerSpacing];
+          heights.forEach((height, index) => {
+            const radius = towerRadius * (index === 0 ? 1.08 : 0.94 - index * 0.04);
+            const shell = new THREE.Mesh(
+              new THREE.CylinderGeometry(radius, radius * 0.96, height, 28),
+              index === 0 ? bodyMaterial : accentMaterial.clone()
+            );
+            shell.position.set(offsets[index], height / 2, index === 1 ? towerSpacing * 0.25 : 0);
+            group.add(shell);
+            if (index === 0) {
+              body = shell;
+            } else {
+              accentMeshes.push(shell);
+            }
+          });
+          const walkway = new THREE.Mesh(
+            new THREE.TorusGeometry(towerRadius * 1.15, towerRadius * 0.08, 12, 32),
+            accentMaterial.clone()
+          );
+          walkway.rotation.x = Math.PI / 2;
+          walkway.position.y = heights[0] * 0.72;
+          group.add(walkway);
+          cap = walkway;
+          accentMeshes.push(walkway);
+
+          const stackHeight = heights[0] * 0.35;
+          const stack = new THREE.Mesh(
+            new THREE.CylinderGeometry(towerRadius * 0.42, towerRadius * 0.32, stackHeight, 20),
+            accentMaterial.clone()
+          );
+          stack.position.set(offsets[0] * 0.42, heights[0] - stackHeight / 2, 0);
+          group.add(stack);
+          accentMeshes.push(stack);
+
+          indicatorAnchor = heights[0] * 0.74;
+          break;
+        }
+        case "reactor": {
+          const pedestalHeight = Math.max(1.6, baseHeight * 0.32);
+          const pedestalRadius = Math.min(baseWidth, baseDepth) * 0.32;
+          const pedestal = new THREE.Mesh(
+            new THREE.CylinderGeometry(pedestalRadius * 0.95, pedestalRadius * 1.02, pedestalHeight, 32),
+            accentMaterial.clone()
+          );
+          pedestal.position.y = pedestalHeight / 2;
+          group.add(pedestal);
+          accentMeshes.push(pedestal);
+
+          const sphereRadius = Math.min(baseWidth, baseDepth) * 0.55;
+          const vessel = new THREE.Mesh(new THREE.SphereGeometry(sphereRadius, 40, 32), bodyMaterial);
+          vessel.position.y = pedestalHeight + sphereRadius;
+          group.add(vessel);
+          body = vessel;
+
+          const band = new THREE.Mesh(
+            new THREE.TorusGeometry(sphereRadius * 0.82, sphereRadius * 0.08, 16, 48),
+            accentMaterial.clone()
+          );
+          band.rotation.x = Math.PI / 2;
+          band.position.y = vessel.position.y;
+          group.add(band);
+          cap = band;
+          accentMeshes.push(band);
+
+          const riserHeight = sphereRadius * 1.2;
+          const riser = new THREE.Mesh(
+            new THREE.CylinderGeometry(sphereRadius * 0.2, sphereRadius * 0.16, riserHeight, 24),
+            accentMaterial.clone()
+          );
+          riser.position.set(sphereRadius * 0.48, pedestalHeight + sphereRadius * 1.1, 0);
+          group.add(riser);
+          accentMeshes.push(riser);
+
+          const cyclone = new THREE.Mesh(
+            new THREE.ConeGeometry(sphereRadius * 0.24, sphereRadius * 0.5, 24),
+            accentMaterial.clone()
+          );
+          cyclone.position.set(-sphereRadius * 0.6, pedestalHeight + sphereRadius * 1.4, 0);
+          group.add(cyclone);
+          accentMeshes.push(cyclone);
+
+          indicatorAnchor = pedestalHeight + sphereRadius * 1.35;
+          break;
+        }
+        case "support": {
+          const cradleHeight = baseHeight * 0.18;
+          const cradle = new THREE.Mesh(
+            new THREE.BoxGeometry(baseWidth * 0.92, cradleHeight, baseDepth * 0.74),
+            accentMaterial.clone()
+          );
+          cradle.position.y = cradleHeight / 2;
+          group.add(cradle);
+          accentMeshes.push(cradle);
+
+          const drumRadius = Math.min(baseHeight, baseDepth) * 0.36;
+          const drumLength = baseWidth * 0.95;
+          const drum = new THREE.Mesh(new THREE.CylinderGeometry(drumRadius, drumRadius, drumLength, 32), bodyMaterial);
+          drum.rotation.z = Math.PI / 2;
+          drum.position.y = cradleHeight + drumRadius;
+          group.add(drum);
+          body = drum;
+
+          const scrubber = new THREE.Mesh(
+            new THREE.CylinderGeometry(drumRadius * 0.28, drumRadius * 0.24, baseHeight * 0.65, 20),
+            accentMaterial.clone()
+          );
+          scrubber.position.set(0, drum.position.y + baseHeight * 0.32, baseDepth * 0.3);
+          group.add(scrubber);
+          cap = scrubber;
+          accentMeshes.push(scrubber);
+
+          indicatorAnchor = drum.position.y + baseHeight * 0.35;
+          break;
+        }
+        case "rect": {
+          const pedestalHeight = baseHeight * 0.18;
+          const pedestal = new THREE.Mesh(
+            new THREE.BoxGeometry(baseWidth * 0.98, pedestalHeight, baseDepth * 0.9),
+            accentMaterial.clone()
+          );
+          pedestal.position.y = pedestalHeight / 2;
+          group.add(pedestal);
+          accentMeshes.push(pedestal);
+
+          const blockHeight = baseHeight * 0.78;
+          const block = new THREE.Mesh(
+            new THREE.BoxGeometry(baseWidth * 0.9, blockHeight, baseDepth * 0.82),
+            bodyMaterial
+          );
+          block.position.y = pedestalHeight + blockHeight / 2;
+          group.add(block);
+          body = block;
+
+          const roofHeight = baseHeight * 0.12;
+          const roof = new THREE.Mesh(
+            new THREE.BoxGeometry(baseWidth * 0.94, roofHeight, baseDepth * 0.86),
+            accentMaterial.clone()
+          );
+          roof.position.y = pedestalHeight + blockHeight + roofHeight / 2;
+          group.add(roof);
+          cap = roof;
+          accentMeshes.push(roof);
+
+          const stack = new THREE.Mesh(
+            new THREE.CylinderGeometry(baseWidth * 0.08, baseWidth * 0.1, baseHeight * 0.82, 18),
+            accentMaterial.clone()
+          );
+          stack.position.set(-baseWidth * 0.28, pedestalHeight + blockHeight + baseHeight * 0.42, baseDepth * 0.18);
+          group.add(stack);
+          accentMeshes.push(stack);
+
+          indicatorAnchor = pedestalHeight + blockHeight + roofHeight * 0.6;
+          break;
+        }
+        default: {
+          const block = new THREE.Mesh(new THREE.BoxGeometry(baseWidth, baseHeight, baseDepth), bodyMaterial);
+          block.position.y = baseHeight / 2;
+          group.add(block);
+          body = block;
+
+          const topper = new THREE.Mesh(
+            new THREE.BoxGeometry(baseWidth * 0.78, baseHeight * 0.32, baseDepth * 0.78),
+            accentMaterial.clone()
+          );
+          topper.position.y = baseHeight + topper.geometry.parameters.height / 2 - 0.4;
+          group.add(topper);
+          cap = topper;
+          accentMeshes.push(topper);
+          break;
+        }
+      }
+
+      if (!body) {
+        body = new THREE.Mesh(new THREE.BoxGeometry(baseWidth, baseHeight, baseDepth), bodyMaterial);
+        body.position.y = baseHeight / 2;
+        group.add(body);
+      }
 
       const indicatorGeometry = new THREE.ConeGeometry(Math.min(baseWidth, baseDepth) * 0.22, baseHeight * 0.9, 20, 1, true);
       const indicatorMaterial = new THREE.MeshStandardMaterial({
@@ -572,10 +770,18 @@ export class TileRenderer {
       });
       const indicator = new THREE.Mesh(indicatorGeometry, indicatorMaterial);
       indicator.rotation.x = Math.PI;
-      indicator.position.y = baseHeight * 0.62;
+      indicator.position.y = indicatorAnchor;
       group.add(indicator);
 
-      const highlightGeometry = new THREE.CylinderGeometry(Math.max(baseWidth, baseDepth) * 0.55, Math.max(baseWidth, baseDepth) * 0.55, 0.6, 38, 1, true);
+      const highlightScale = def.style === "towers" ? 0.72 : def.style === "reactor" ? 0.68 : def.style === "support" ? 0.7 : 0.55;
+      const highlightGeometry = new THREE.CylinderGeometry(
+        Math.max(baseWidth, baseDepth) * highlightScale,
+        Math.max(baseWidth, baseDepth) * highlightScale,
+        0.6,
+        38,
+        1,
+        true
+      );
       const highlightMaterial = new THREE.MeshBasicMaterial({
         color: 0xffffff,
         transparent: true,
@@ -600,6 +806,7 @@ export class TileRenderer {
         label,
         pad,
         padMaterial,
+        accentMeshes,
         baseColor: new THREE.Color(def.color),
         accentColor: new THREE.Color(def.accent),
       });
@@ -876,8 +1083,8 @@ export class TileRenderer {
       group.add(lid);
 
       const gaugeGroup = new THREE.Group();
-      gaugeGroup.position.set(radius + 0.6, 0.12, 0);
-      gaugeGroup.rotation.y = Math.PI / 2;
+      const gaugeMountY = height * 0.08;
+      gaugeGroup.position.set(radius + 0.8, gaugeMountY, 0);
       group.add(gaugeGroup);
 
       const gaugeHeight = height * 0.84;
@@ -899,6 +1106,7 @@ export class TileRenderer {
         color: entry.color,
         transparent: true,
         opacity: 0.78,
+        depthWrite: false,
         side: THREE.DoubleSide,
       });
       const fill = new THREE.Mesh(fillGeometry, fillMaterial);
@@ -910,7 +1118,8 @@ export class TileRenderer {
       const overlayMaterial = new THREE.MeshBasicMaterial({
         color: 0xffffff,
         transparent: true,
-        opacity: 0.08,
+        opacity: 0.12,
+        depthWrite: false,
         side: THREE.DoubleSide,
       });
       const overlay = new THREE.Mesh(overlayGeometry, overlayMaterial);
@@ -921,6 +1130,7 @@ export class TileRenderer {
         color: palette.storageLabels || 0xeaf2ff,
         transparent: true,
         opacity: 0.42,
+        depthWrite: false,
         side: THREE.DoubleSide,
       });
       const tickGroup = new THREE.Group();
@@ -945,6 +1155,8 @@ export class TileRenderer {
         shell,
         lid,
         indicator: fill,
+        gaugeGroup,
+        gaugeMountY,
         gaugeFrame: frame,
         gaugeOverlay: overlay,
         gaugeTicks: tickGroup,
@@ -1446,6 +1658,11 @@ export class TileRenderer {
     if (this.quayMesh?.material) {
       const quayColor = new THREE.Color(palette.storageShell || 0x6c7682).lerp(new THREE.Color(0x4e5965), 0.35);
       this.quayMesh.material.color.copy(quayColor);
+    }
+    for (const unit of this.unitMeshes?.values?.() || []) {
+      if (unit.padMaterial?.color) {
+        unit.padMaterial.color.copy(new THREE.Color(palette.ground || 0x1b2736).lerp(new THREE.Color(0x283749), 0.4));
+      }
     }
     for (const tank of this.storageMeshes.values()) {
       if (tank.gaugeFrame?.material) {
