@@ -632,11 +632,11 @@ export class RefinerySimulation {
     const focus = clamp(this.params.productFocus, 0, 1);
     const centered = focus - 0.5;
 
-    let gasShare = clamp(0.05 + centered * 0.05, 0.02, 0.12);
-    let naphthaShare = clamp(0.32 + centered * 0.22, 0.22, 0.5);
+    let gasShare = clamp(0.08 + centered * 0.05, 0.035, 0.16);
+    let naphthaShare = clamp(0.36 + centered * 0.25, 0.26, 0.55);
     let keroseneShare = 0.11 + scenario.jetBias * 0.05;
-    let dieselShare = clamp(0.28 - centered * 0.16 + scenario.dieselBias * 0.06, 0.18, 0.38);
-    let heavyShare = clamp(0.19 - centered * 0.08, 0.12, 0.28);
+    let dieselShare = clamp(0.27 - centered * 0.14 + scenario.dieselBias * 0.06, 0.18, 0.36);
+    let heavyShare = clamp(0.17 - centered * 0.06, 0.11, 0.26);
 
     let residShare = Math.max(
       0.06,
@@ -832,14 +832,14 @@ export class RefinerySimulation {
     result.lpg += Math.max(0, lpgPool);
 
     const totalLiquidProducts = result.gasoline + result.diesel + result.jet;
-    const maxLiquidProducts = crudeThroughput * 0.92;
+    const maxLiquidProducts = crudeThroughput * 1.02;
     if (totalLiquidProducts > maxLiquidProducts && totalLiquidProducts > 0) {
       const scale = maxLiquidProducts / totalLiquidProducts;
       result.gasoline *= scale;
       result.diesel *= scale;
       result.jet *= scale;
     }
-    const maxLpg = crudeThroughput * 0.08;
+    const maxLpg = crudeThroughput * 0.12;
     if (result.lpg > maxLpg) {
       result.lpg = maxLpg;
     }
@@ -1517,7 +1517,7 @@ export class RefinerySimulation {
       return null;
     }
 
-    const overallRatio = this._computeStorageUtilization();
+    const overallRatio = planning.overallRatio ?? this._computeStorageUtilization();
     const capacity = this.storage?.capacity?.[chosenProduct] || 0;
     const level = this.storage?.levels?.[chosenProduct] || 0;
     const productRatio = capacity ? clamp(level / capacity, 0, 1.3) : 0;
@@ -1532,7 +1532,7 @@ export class RefinerySimulation {
     }
 
     const resolvedDueIn = Math.max(
-      autoplan ? 4.5 : 0.5,
+      autoplan ? 6.5 : 0.5,
       typeof dueIn === "number" && Number.isFinite(dueIn)
         ? dueIn
         : randomRange(autoplan ? planning.baseSpacing * 0.85 : 4, autoplan ? planning.baseSpacing * 1.2 : 9)
@@ -1577,8 +1577,13 @@ export class RefinerySimulation {
     const scenario = this.activeScenario || this.scenarios?.steady || {};
     const demandPerDay = this._calculateMarketDemand(HOURS_PER_DAY, scenario);
     const weights = this._calculateShipmentWeights(demandPerDay, scenario);
-    const baseSpacing = this._computeShipmentSpacing(demandPerDay);
-    return { demandPerDay, weights, baseSpacing, scenario };
+    let baseSpacing = this._computeShipmentSpacing(demandPerDay);
+    const overallRatio = this._computeStorageUtilization();
+    if (overallRatio < 0.8) {
+      const slackFactor = 1.1 + Math.max(0, 0.8 - overallRatio) * 0.8;
+      baseSpacing *= slackFactor;
+    }
+    return { demandPerDay, weights, baseSpacing, scenario, overallRatio };
   }
 
   _calculateShipmentWeights(demandPerDay, scenario = {}) {
@@ -2475,8 +2480,8 @@ export class RefinerySimulation {
 
     const nowDue = Number.isFinite(target.dueIn) ? Math.max(0.1, target.dueIn) : 2.5;
     const baseWindow = Math.max(1.5, target.window || 6);
-    const delayHours = clamp(Math.max(2.5, baseWindow * 0.25), 2, 6);
-    const maxSlack = Math.max(3, baseWindow * 0.6);
+    const delayHours = clamp(Math.max(4, baseWindow * 0.4), 4, 10);
+    const maxSlack = Math.max(6, baseWindow * 1.2);
     const newDue = Math.min(nowDue + delayHours, nowDue + maxSlack);
 
     if (newDue <= nowDue + 0.2) {
@@ -2488,7 +2493,7 @@ export class RefinerySimulation {
     target.window = Math.max(target.window || newDue, newDue + Math.max(1.5, delayHours * 0.35));
     target.rescheduledAt = this.timeMinutes;
 
-    this.pendingOperationalCost += delayHours * 30;
+    this.pendingOperationalCost += delayHours * 18;
     this._updateNextShipmentCountdown();
     this._ensureScheduledShipments(this.shipmentHorizonHours);
 
