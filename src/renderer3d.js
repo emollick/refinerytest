@@ -215,6 +215,23 @@ export class TileRenderer {
     const storageCap = logistics.storage?.capacity || {};
 
     for (const tank of this.storageMeshes.values()) {
+      const levelRaw = Number(storageLevels[tank.key]);
+      const capacityRaw = Number(storageCap[tank.key]);
+      const level = Number.isFinite(levelRaw) ? levelRaw : 0;
+      const capacity = Number.isFinite(capacityRaw) && capacityRaw > 0 ? capacityRaw : 1;
+      const ratio = clamp(level / capacity, 0, 1);
+
+      if (tank.indicator) {
+        const indicatorScale = clamp(ratio, 0.05, 1);
+        tank.indicator.scale.y = indicatorScale;
+        tank.indicator.material.opacity = 0.35 + ratio * 0.45;
+        tank.indicator.position.y = (tank.baseHeight || 14) * indicatorScale * 0.45 + (tank.baseHeight || 14) * 0.05;
+        const gaugeColor = (tank.baseColor || new THREE.Color(0xffffff)).clone();
+        gaugeColor.lerp(new THREE.Color(0xffffff), ratio * 0.3);
+        tank.indicator.material.color.copy(gaugeColor);
+        tank.indicator.visible = true;
+      }
+
       if (tank.fill) {
         tank.fill.visible = false;
       }
@@ -224,13 +241,14 @@ export class TileRenderer {
       }
 
       if (tank.shell?.material) {
-        tank.shell.material.color.copy(tank.shell.material.userData?.baseColor || tank.shell.material.color);
-        tank.shell.material.emissiveIntensity = 0.1;
+        const baseColor = tank.shell.material.userData?.baseColor || tank.shell.material.color;
+        tank.shell.material.color.copy(baseColor).lerp(new THREE.Color(0xffffff), ratio * 0.1);
+        tank.shell.material.emissiveIntensity = 0.08 + ratio * 0.3;
       }
 
       if (tank.label) {
         tank.label.position.y = (tank.baseHeight || 14) + 5;
-        tank.label.material.opacity = 0.85;
+        tank.label.material.opacity = 0.75 + ratio * 0.25;
       }
     }
 
@@ -373,12 +391,6 @@ export class TileRenderer {
     for (const unit of this.unitDefs) {
       xs.push(unit.tileX, unit.tileX + unit.width);
       ys.push(unit.tileY, unit.tileY + unit.height);
-    }
-    for (const pipeline of this.pipelineDefs) {
-      for (const point of pipeline.path || []) {
-        xs.push(point.x);
-        ys.push(point.y);
-      }
     }
     if (!xs.length) {
       xs.push(0, 16);
@@ -710,6 +722,7 @@ export class TileRenderer {
       const fill = new THREE.Mesh(fillGeometry, fillMaterial);
       fill.scale.set(0.86, 1, 0.86);
       fill.position.y = height * 0.5;
+      fill.visible = false;
       group.add(fill);
 
       const surfaceGeometry = new THREE.CircleGeometry(radius * 0.82, 32);
@@ -725,7 +738,22 @@ export class TileRenderer {
       const surface = new THREE.Mesh(surfaceGeometry, surfaceMaterial);
       surface.rotation.x = -Math.PI / 2;
       surface.position.y = fill.position.y + (height * fill.scale.y) / 2;
+      surface.visible = false;
       group.add(surface);
+
+      const gaugeGeometry = new THREE.PlaneGeometry(radius * 0.55, height * 0.85);
+      const gaugeMaterial = new THREE.MeshBasicMaterial({
+        color: entry.color,
+        transparent: true,
+        opacity: 0.45,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const gauge = new THREE.Mesh(gaugeGeometry, gaugeMaterial);
+      gauge.position.set(radius + 0.35, height * 0.45, 0);
+      gauge.rotation.y = Math.PI / 2;
+      gauge.scale.y = 0.5;
+      group.add(gauge);
 
       const label = createLabelSprite(entry.key.toUpperCase(), palette.storageLabels);
       label.position.set(0, height + 5, 0);
@@ -738,6 +766,7 @@ export class TileRenderer {
         shell,
         lid,
         fill,
+        indicator: gauge,
         label,
         baseRadius: radius,
         baseHeight: height,
