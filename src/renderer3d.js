@@ -213,18 +213,14 @@ export class TileRenderer {
 
     const storageLevels = logistics.storage?.levels || {};
     const storageCap = logistics.storage?.capacity || {};
-    const baseCap = logistics.storage?.baseCapacity || {};
     for (const tank of this.storageMeshes.values()) {
       const rawLevel = storageLevels[tank.key];
       const rawCapacity = storageCap[tank.key];
-      const rawBase = baseCap[tank.key];
-
-      const level = Number.isFinite(rawLevel) ? rawLevel : 0;
-      const capacity = Number.isFinite(rawCapacity) ? rawCapacity : 0;
-      const baseCapacity = Number.isFinite(rawBase) ? rawBase : capacity;
-
+      const parsedLevel = Number(rawLevel);
+      const parsedCapacity = Number(rawCapacity);
+      const level = Number.isFinite(parsedLevel) ? parsedLevel : 0;
+      const capacity = Number.isFinite(parsedCapacity) && parsedCapacity > 0 ? parsedCapacity : 1;
       const safeCapacity = Math.max(capacity, 1e-3);
-      const safeBaseCapacity = Math.max(baseCapacity, 1e-3);
       const ratio = clamp(level / safeCapacity, 0, 1);
       if (tank.baseColor) {
         const color = tank.baseColor.clone().lerp(new THREE.Color(0xffffff), ratio * 0.25);
@@ -233,50 +229,43 @@ export class TileRenderer {
           tank.surface.material.color.copy(color.clone().lerp(new THREE.Color(0xffffff), 0.18));
         }
       }
-      const baseCapacity = Math.max(baseCap[tank.key] || capacity || 1, 1e-3);
-      let capRatio = safeCapacity / safeBaseCapacity;
-      if (!Number.isFinite(capRatio)) {
-        capRatio = 1;
-      }
-      const radiusScale = Number.isFinite(capRatio)
-        ? clamp(Math.pow(Math.max(capRatio, 1e-3), 0.42), 0.85, 1.55)
-        : 1;
-      const heightScale = Number.isFinite(capRatio)
-        ? clamp(Math.pow(Math.max(capRatio, 1e-3), 0.6), 0.9, 1.8)
-        : 1;
       const minFill = 0.02;
-      const fillRatio = Math.max(ratio, minFill);
-      const height = (tank.baseHeight || 14) * heightScale;
+      const fillRatio = clamp(ratio, minFill, 1);
+      const baseHeight = tank.baseHeight || 14;
+      const baseScale = tank.fillBaseScale || { x: 1, y: 1, z: 1 };
+      const fillScaleX = Number.isFinite(baseScale.x) ? baseScale.x : 1;
+      const fillScaleZ = Number.isFinite(baseScale.z) ? baseScale.z : 1;
+      const fillScaleY = Number.isFinite(baseScale.y) ? baseScale.y * fillRatio : fillRatio;
+      const fillHeight = Math.max(baseHeight * fillScaleY, baseHeight * minFill);
+      const baseOffset = 0.05;
 
       if (tank.shell) {
-        const shellRadiusScale = Number.isFinite(radiusScale) ? radiusScale : 1;
-        const shellHeightScale = Number.isFinite(heightScale) ? heightScale : 1;
-        tank.shell.scale.set(shellRadiusScale, shellHeightScale, shellRadiusScale);
-        tank.shell.position.y = height / 2;
+        tank.shell.scale.set(1, 1, 1);
+        tank.shell.position.y = baseHeight / 2;
       }
       if (tank.lid) {
-        const lidScale = Number.isFinite(radiusScale) ? radiusScale : 1;
-        tank.lid.scale.set(lidScale, lidScale, 1);
-        tank.lid.position.y = height + 0.02;
+        tank.lid.scale.set(1, 1, 1);
+        tank.lid.position.y = baseHeight + 0.02;
       }
-      const fillRadiusScale = Number.isFinite(radiusScale) ? radiusScale * 0.86 : 0.86;
-      const fillHeightScale = Number.isFinite(heightScale) ? heightScale : 1;
-      tank.fill.scale.set(fillRadiusScale, Math.max(fillRatio * fillHeightScale, minFill), fillRadiusScale);
-      tank.fill.position.y = Math.max(fillRatio * height / 2, minFill * height);
+
+      if (tank.fill && Number.isFinite(fillScaleY)) {
+        tank.fill.scale.set(fillScaleX, fillScaleY, fillScaleZ);
+        tank.fill.position.y = fillHeight / 2 + baseOffset;
+      }
       const emissiveIntensity = 0.25 + ratio * 1.5;
       tank.fill.material.emissiveIntensity = emissiveIntensity;
 
       if (tank.surface) {
-        const surfaceScale = Number.isFinite(radiusScale) ? radiusScale : 1;
-        tank.surface.scale.set(surfaceScale, surfaceScale, 1);
-        tank.surface.position.y = Math.max(fillRatio * height, minFill * height * 1.2);
+        tank.surface.scale.set(1, 1, 1);
+        const surfaceHeight = Math.max(fillHeight + baseOffset * 0.5, baseHeight * minFill);
+        tank.surface.position.y = surfaceHeight;
         tank.surface.material.opacity = 0.65 + ratio * 0.3;
         if (tank.surface.material.emissive) {
           tank.surface.material.emissiveIntensity = 0.12 + ratio * 0.6;
         }
       }
       if (tank.label) {
-        tank.label.position.y = height + 5;
+        tank.label.position.y = baseHeight + 5;
         tank.label.material.opacity = 0.75 + ratio * 0.25;
       }
     }
@@ -754,8 +743,8 @@ export class TileRenderer {
         roughness: 0.42,
       });
       const fill = new THREE.Mesh(fillGeometry, fillMaterial);
-      fill.scale.set(0.86, 0.1, 0.86);
-      fill.position.y = height * 0.05;
+      fill.scale.set(0.86, 1, 0.86);
+      fill.position.y = height * 0.5;
       group.add(fill);
 
       const surfaceGeometry = new THREE.CircleGeometry(radius * 0.82, 32);
@@ -790,6 +779,7 @@ export class TileRenderer {
         surface,
         radius,
         baseColor: new THREE.Color(entry.color),
+        fillBaseScale: { x: 0.86, y: 1, z: 0.86 },
       });
     }
   }
