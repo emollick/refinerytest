@@ -223,20 +223,19 @@ export class TileRenderer {
         : 1;
       const ratio = clamp(level / capacity, 0, 1);
 
-      if (tank.baseColor) {
-        const color = tank.baseColor.clone().lerp(new THREE.Color(0xffffff), ratio * 0.2);
-        tank.fill.material.color.copy(color);
-      }
-
       if (tank.fill) {
-        tank.fill.scale.set(0.86, 1, 0.86);
-        tank.fill.position.y = (tank.baseHeight || 14) * 0.5;
-        tank.fill.material.opacity = clamp(0.25 + ratio * 0.7, 0.25, 0.95);
-        tank.fill.material.emissiveIntensity = 0.25 + ratio * 1.2;
+        tank.fill.visible = false;
       }
 
       if (tank.surface) {
         tank.surface.visible = false;
+      }
+
+      if (tank.shell?.material) {
+        const baseColor = tank.shell.material.userData.baseColor || tank.shell.material.color.clone();
+        tank.shell.material.userData.baseColor = baseColor;
+        tank.shell.material.color.copy(baseColor).lerp(new THREE.Color(0xffffff), ratio * 0.15);
+        tank.shell.material.emissiveIntensity = 0.1 + ratio * 0.4;
       }
 
       if (tank.label) {
@@ -696,6 +695,10 @@ export class TileRenderer {
         roughness: 0.58,
         side: THREE.DoubleSide,
       });
+      if (shellMaterial.emissive) {
+        shellMaterial.emissive = new THREE.Color(palette.storageShell).multiplyScalar(0.1);
+        shellMaterial.emissiveIntensity = 0.1;
+      }
       const shell = new THREE.Mesh(shellGeometry, shellMaterial);
       shell.position.y = height / 2;
       group.add(shell);
