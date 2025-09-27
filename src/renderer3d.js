@@ -583,11 +583,21 @@ export class TileRenderer {
           points.push(point);
         }
       });
-      if (points.length < 2) {
+      const filtered = points.filter(
+        (pt) =>
+          pt &&
+          typeof pt.x === "number" &&
+          typeof pt.y === "number" &&
+          typeof pt.z === "number" &&
+          Number.isFinite(pt.x) &&
+          Number.isFinite(pt.y) &&
+          Number.isFinite(pt.z)
+      );
+      if (filtered.length < 2) {
         continue;
       }
-      const curve = new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.4);
-      const segments = Math.max(points.length * 12, 64);
+      const curve = new THREE.CatmullRomCurve3(filtered, false, "catmullrom", 0.4);
+      const segments = Math.max(filtered.length * 12, 64);
       const tubeGeometry = new THREE.TubeGeometry(curve, segments, 0.4, 16, false);
       const baseColor = new THREE.Color(def.color ?? 0x6aa5ff);
 
