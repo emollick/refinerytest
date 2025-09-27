@@ -232,14 +232,6 @@ export class TileRenderer {
         tank.indicator.visible = true;
       }
 
-      if (tank.fill) {
-        tank.fill.visible = false;
-      }
-
-      if (tank.surface) {
-        tank.surface.visible = false;
-      }
-
       if (tank.shell?.material) {
         const baseColor = tank.shell.material.userData?.baseColor || tank.shell.material.color;
         tank.shell.material.color.copy(baseColor).lerp(new THREE.Color(0xffffff), ratio * 0.1);
@@ -688,7 +680,7 @@ export class TileRenderer {
       group.position.copy(world);
       this.scene.add(group);
 
-      const radius = Math.max(2.6, spanX * 0.08);
+      const radius = 3.2;
       const height = 14;
       const shellGeometry = new THREE.CylinderGeometry(radius, radius, height, 26, 1, true);
       const shellMaterial = new THREE.MeshStandardMaterial({
@@ -708,38 +700,6 @@ export class TileRenderer {
       lid.rotation.x = -Math.PI / 2;
       lid.position.y = height + 0.02;
       group.add(lid);
-
-      const fillGeometry = new THREE.CylinderGeometry(radius * 0.86, radius * 0.86, height, 26, 1, true);
-      const fillMaterial = new THREE.MeshStandardMaterial({
-        color: entry.color,
-        emissive: new THREE.Color(entry.color).multiplyScalar(0.22),
-        emissiveIntensity: 0.8,
-        transparent: true,
-        opacity: 0.78,
-        metalness: 0.1,
-        roughness: 0.42,
-      });
-      const fill = new THREE.Mesh(fillGeometry, fillMaterial);
-      fill.scale.set(0.86, 1, 0.86);
-      fill.position.y = height * 0.5;
-      fill.visible = false;
-      group.add(fill);
-
-      const surfaceGeometry = new THREE.CircleGeometry(radius * 0.82, 32);
-      const surfaceMaterial = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(entry.color).lerp(new THREE.Color(0xffffff), 0.2),
-        metalness: 0.08,
-        roughness: 0.24,
-        transparent: true,
-        opacity: 0.92,
-      });
-      surfaceMaterial.emissive = new THREE.Color(entry.color).multiplyScalar(0.12);
-      surfaceMaterial.emissiveIntensity = 0.2;
-      const surface = new THREE.Mesh(surfaceGeometry, surfaceMaterial);
-      surface.rotation.x = -Math.PI / 2;
-      surface.position.y = fill.position.y + (height * fill.scale.y) / 2;
-      surface.visible = false;
-      group.add(surface);
 
       const gaugeGeometry = new THREE.PlaneGeometry(radius * 0.55, height * 0.85);
       const gaugeMaterial = new THREE.MeshBasicMaterial({
@@ -765,15 +725,12 @@ export class TileRenderer {
         group,
         shell,
         lid,
-        fill,
         indicator: gauge,
         label,
         baseRadius: radius,
         baseHeight: height,
-        surface,
         radius,
         baseColor: new THREE.Color(entry.color),
-        fillBaseScale: { x: 0.86, y: 1, z: 0.86 },
       });
     }
   }
