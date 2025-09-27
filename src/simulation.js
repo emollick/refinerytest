@@ -910,11 +910,11 @@ export class RefinerySimulation {
       result.diesel * 0.6 +
       result.gasoline * 0.5 +
       incidentsRisk.incidents * 2.8;
-    const envMitigation = 1 - clamp(environmentLevel * 0.55, 0, 0.6);
+    const envMitigation = 1 - clamp(environmentLevel * 0.55 + environmentLevel * environmentLevel * 0.32, 0, 0.85);
     const carbonPerHour = carbonBase * envMitigation;
     const carbonPerDay = perHourToPerDay(carbonPerHour);
     const productionPerDay = perHourToPerDay(result.gasoline + result.diesel + result.jet);
-    const environmentTarget = clamp(0.34 - environmentLevel * 0.22 + (scenario.environmentPressure || 0) * 0.05, 0.12, 0.5);
+    const environmentTarget = clamp(0.32 - environmentLevel * 0.18 + (scenario.environmentPressure || 0) * 0.05, 0.16, 0.5);
     const carbonIntensity = productionPerDay > 0 ? carbonPerDay / productionPerDay : carbonPerDay;
     const envExcess = Math.max(0, carbonIntensity - environmentTarget);
     let environmentPenalty = 0;
@@ -923,6 +923,8 @@ export class RefinerySimulation {
       if (envExcess > 0.05) {
         environmentPenalty *= 1.15;
       }
+      const penaltySuppression = clamp(1 - environmentLevel * 1.05, 0, 1);
+      environmentPenalty *= penaltySuppression;
     }
 
     if (this._environmentPenaltyCooldown > 0) {
