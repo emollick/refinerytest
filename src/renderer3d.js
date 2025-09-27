@@ -213,6 +213,7 @@ export class TileRenderer {
 
     const storageLevels = logistics.storage?.levels || {};
     const storageCap = logistics.storage?.capacity || {};
+    const baseCap = logistics.storage?.baseCapacity || {};
     for (const tank of this.storageMeshes.values()) {
       const level = storageLevels[tank.key] || 0;
       const capacity = storageCap[tank.key] || 1;
@@ -224,17 +225,39 @@ export class TileRenderer {
           tank.surface.material.color.copy(color.clone().lerp(new THREE.Color(0xffffff), 0.18));
         }
       }
-      tank.fill.scale.y = Math.max(ratio, 0.02);
-      tank.fill.position.y = tank.baseHeight * tank.fill.scale.y * 0.5 + 0.05;
+      const baseCapacity = baseCap[tank.key] || capacity || 1;
+      const capRatio = clamp(capacity / baseCapacity, 0.6, 2.8);
+      const radiusScale = clamp(Math.pow(capRatio, 0.42), 0.85, 1.55);
+      const heightScale = clamp(Math.pow(capRatio, 0.6), 0.9, 1.8);
+      const minFill = 0.02;
+      const fillRatio = Math.max(ratio, minFill);
+      const height = tank.baseHeight * heightScale;
+
+      if (tank.shell) {
+        tank.shell.scale.set(radiusScale, heightScale, radiusScale);
+        tank.shell.position.y = height / 2;
+      }
+      if (tank.lid) {
+        tank.lid.scale.set(radiusScale, radiusScale, 1);
+        tank.lid.position.y = height + 0.02;
+      }
+      const fillRadiusScale = radiusScale * 0.86;
+      tank.fill.scale.set(fillRadiusScale, fillRatio * heightScale, fillRadiusScale);
+      tank.fill.position.y = fillRatio * height / 2;
       const emissiveIntensity = 0.25 + ratio * 1.5;
       tank.fill.material.emissiveIntensity = emissiveIntensity;
-      tank.label.material.opacity = 0.75 + ratio * 0.25;
+
       if (tank.surface) {
-        tank.surface.position.y = tank.fill.position.y + (tank.baseHeight * tank.fill.scale.y) / 2 - 0.02;
+        tank.surface.scale.set(radiusScale, radiusScale, 1);
+        tank.surface.position.y = fillRatio * height;
         tank.surface.material.opacity = 0.65 + ratio * 0.3;
         if (tank.surface.material.emissive) {
           tank.surface.material.emissiveIntensity = 0.12 + ratio * 0.6;
         }
+      }
+      if (tank.label) {
+        tank.label.position.y = height + 5;
+        tank.label.material.opacity = 0.75 + ratio * 0.25;
       }
     }
 
@@ -701,7 +724,7 @@ export class TileRenderer {
         roughness: 0.42,
       });
       const fill = new THREE.Mesh(fillGeometry, fillMaterial);
-      fill.scale.y = 0.1;
+      fill.scale.set(0.86, 0.1, 0.86);
       fill.position.y = height * 0.05;
       group.add(fill);
 
@@ -728,8 +751,11 @@ export class TileRenderer {
       this.storageMeshes.set(entry.key, {
         key: entry.key,
         group,
+        shell,
+        lid,
         fill,
         label,
+        baseRadius: radius,
         baseHeight: height,
         surface,
         radius,

@@ -1365,21 +1365,23 @@ export class RefinerySimulation {
   _scheduleShipment() {
     const productPool = ["gasoline", "gasoline", "diesel", "diesel", "jet"];
     const product = productPool[Math.floor(Math.random() * productPool.length)];
-    const base = product === "jet" ? 46 : product === "diesel" ? 54 : 60;
-    const capacityTotal =
-      this.storage.capacity.gasoline +
-      this.storage.capacity.diesel +
-      this.storage.capacity.jet;
-    const levelTotal =
-      this.storage.levels.gasoline +
-      this.storage.levels.diesel +
-      this.storage.levels.jet;
-    const utilization = capacityTotal ? clamp(levelTotal / capacityTotal, 0, 1) : 0;
-    const urgency = utilization > 0.92 ? 0.6 : utilization > 0.82 ? 0.3 : 0;
-    const volumeMultiplier = 1 + urgency * 0.4;
-    const windowScale = Math.max(0.55, 1 - urgency * 0.5);
-    const volume = Math.round(randomRange(base * 0.75, base * 1.35) * volumeMultiplier);
-    const window = Math.max(2.5, randomRange(4, 7.5) * windowScale);
+
+    const capacity = this.storage.capacity[product] || 120;
+    const currentLevel = this.storage.levels[product] || 0;
+    const utilization = capacity ? clamp(currentLevel / capacity, 0, 1.2) : 0;
+
+    const baseShare = product === "jet" ? 0.22 : product === "diesel" ? 0.28 : 0.32;
+    const baseVolume = capacity * baseShare;
+    const urgency = utilization > 0.9 ? 0.55 : utilization > 0.8 ? 0.25 : 0;
+    const volume = Math.max(
+      24,
+      Math.round(randomRange(baseVolume * 0.65, baseVolume * 1.1) * (1 + urgency * 0.45))
+    );
+
+    const baseWindowHours = product === "jet" ? 7.5 : 6.5;
+    const windowMin = baseWindowHours * (1 - urgency * 0.5);
+    const windowMax = baseWindowHours * (1 - urgency * 0.25) + 2;
+    const window = clamp(randomRange(windowMin, windowMax), 3.5, 9);
     const shipment = {
       id: `ship-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
       product,
